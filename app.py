@@ -9,7 +9,7 @@ st.set_page_config(page_title="내신 변형문제 생성기", layout="wide")
 
 # API 키 설정
 if "GEMINI_API_KEY" in st.secrets:
-    genai.configure(api_key=st.secrets["AQ.Ab8RN6KHOYCUt0H-2yUYnymmeDhos7d-EU2-4-JcFAWUgo0HGg"])
+    genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
 else:
     st.error("API 키가 설정되지 않았습니다. Secrets 설정을 확인해 주세요.")
     st.stop()
