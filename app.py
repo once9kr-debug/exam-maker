@@ -22,7 +22,7 @@ if not os.path.exists(font_path):
     url = "https://github.com/google/fonts/raw/main/ofl/nanumgothic/NanumGothic-Regular.ttf"
     urllib.request.urlretrieve(url, font_path)
 
-# 공통 지문 DB (임시 샘플)
+# 공통 지문 DB
 mock_db = {
     "18번": "Dear Mr. Jones,\nI am writing to you on behalf of the student council...",
     "19번": "As I walked into the dark room, my heart started to beat faster...",
@@ -70,7 +70,6 @@ with tab_workbook:
         }
         df = pd.DataFrame(data)
         df.insert(0, "선택", False)
-        
         st.data_editor(df, column_config={"선택": st.column_config.CheckboxColumn("선택", default=False)}, disabled=["자료명", "문항 수", "업로드일"], hide_index=True, use_container_width=True)
 
 # ==========================================
@@ -81,11 +80,11 @@ with tab_exam:
     
     exam_col1, exam_col2, exam_col3 = st.columns(3)
     with exam_col1:
-        exam_grade = st.selectbox("대상 학년", ["고1", "고2", "고3"], key="exam_grade", index=0)
+        exam_grade = st.selectbox("대상 학년", ["고1", "고2", "고3"], key="exam_grade_select", index=0)
     with exam_col2:
-        exam_year = st.selectbox("모의고사 연도", ["2026년", "2025년", "2024년"], key="exam_year")
+        exam_year = st.selectbox("모의고사 연도", ["2026년", "2025년", "2024년"], key="exam_year_select")
     with exam_col3:
-        exam_month = st.selectbox("시행 월", ["3월", "6월", "9월", "11월"], key="exam_month", index=1)
+        exam_month = st.selectbox("시행 월", ["3월", "6월", "9월", "11월"], key="exam_month_select", index=1)
         
     st.write("")
     select_all_q = st.checkbox("✅ **전체 지문 선택**", key="exam_all_q")
@@ -124,13 +123,12 @@ with tab_exam:
         elif not selected_types:
             st.warning("문제 유형을 1개 이상 선택해주세요.")
         else:
-            with st.spinner("AI가 실제 모의고사 양식(지문 박스 포함)으로 시험지를 디자인하고 있습니다..."):
+            with st.spinner("AI가 튼튼한 테이블 박스로 시험지를 설계하고 있습니다..."):
                 passages_text = ""
                 for q in selected_q_nums:
                     text = mock_db.get(q, f"[{q} 지문 업데이트가 필요합니다]")
                     passages_text += f"[{q}]\n{text}\n\n"
 
-                # 프롬프트: 지문을 [박스시작]과 [박스끝]으로 감싸도록 강제
                 prompt = f'''당신은 고등학교 내신 영어 출제 전문가입니다. 제공된 지문으로 선택된 문제 유형의 변형 문제를 만드세요.
 
 [선택된 문제 유형]
@@ -140,7 +138,7 @@ with tab_exam:
 {passages_text}
 
 [출력 규칙 및 필수 사항 - 매우 중요]
-1. 절대 HTML 태그를 사용하지 마세요.
+1. 절대 마크다운이나 HTML 태그를 사용하지 마세요.
 2. 각 문제는 반드시 아래의 [출력 포맷 예시]와 100% 동일한 구조로 작성하세요.
 3. 지문 내용은 반드시 "[박스시작]"과 "[박스끝]" 사이에 넣으세요.
 4. 빈칸 밑줄은 반드시 `_____` (밑줄 5개)만 사용하세요.
@@ -176,30 +174,34 @@ I am writing to you on behalf of the student council.
                     for prob in problems:
                         if '[문제시작]' not in prob: continue
                         try:
-                            # AI가 보낸 텍스트를 정확하게 3등분(문제, 정답, 해설)으로 쪼개기
+                            # 텍스트 3등분
                             q_main = prob.split('[문제시작]')[1].split('[정답시작]')[0].strip()
                             ans_part = prob.split('[정답시작]')[1].split('[해설시작]')[0].strip()
                             exp_part = prob.split('[해설시작]')[1].strip()
                             
-                            # 1. 문제지 파트 조립 (특수문자 처리 및 줄바꿈 적용)
+                            # 문제 번호 추출 (정답지에 표시하기 위함)
+                            q_num_text = q_main.split('\n')[0].strip()
+                            
+                            # 1. 문제지 파트 조립
                             q_html = q_main.replace('<', '&lt;').replace('>', '&gt;')
                             q_html = q_html.replace('\n', '<br/>')
-                            # [박스시작]과 [박스끝]을 실제 검은색 테두리 CSS 박스로 변환!
-                            q_html = q_html.replace('[박스시작]', '<div class="passage-box">')
-                            q_html = q_html.replace('[박스끝]', '</div>')
                             
-                            questions_html += f"<div class='question-block'>{q_html}</div>"
+                            # 💥 핵심 처방: 오류 나는 div 상자 대신, 완벽하게 튼튼한 '표(table)'로 지문 감싸기
+                            q_html = q_html.replace('[박스시작]', '<table class="passage-table"><tr><td>')
+                            q_html = q_html.replace('[박스끝]', '</td></tr></table>')
                             
-                            # 2. 해설지 파트 조립
+                            questions_html += f"<div class='question-block'>{q_html}</div><br/>"
+                            
+                            # 2. 해설지 파트 조립 (문제 번호 포함)
                             a_html = exp_part.replace('<', '&lt;').replace('>', '&gt;').replace('\n', '<br/>')
-                            answers_html += f"<div class='answer-block'><b>[정답] {ans_part}</b><br/><b>[해설]</b> {a_html}</div>"
-                        except:
+                            answers_html += f"<div class='answer-block'><b>[정답] {q_num_text} - {ans_part}</b><br/><b>[해설]</b> {a_html}</div><br/>"
+                        except Exception as e:
                             continue
 
                     st.subheader("📝 생성된 시험지 텍스트 미리보기")
                     st.write(raw_text.replace('[박스시작]', '---지문 시작---').replace('[박스끝]', '---지문 끝---'))
                     
-                    with st.spinner("완벽한 2단 박스 레이아웃으로 PDF를 인쇄 중입니다..."):
+                    with st.spinner("가장 안정적인 레이아웃으로 PDF를 인쇄 중입니다..."):
                         
                         header_title = f"{exam_year} {exam_month} {exam_grade} 모의고사 변형문제"
                         
@@ -223,20 +225,23 @@ I am writing to you on behalf of the student council.
                                     @frame col2_frame {{ left: 315pt; width: 240pt; top: 70pt; height: 720pt; }}
                                     @frame footer_frame {{ -pdf-frame-content: footer_content; left: 40pt; width: 515pt; top: 805pt; height: 20pt; }}
                                 }}
-                                /* 진짜 모의고사 같은 헤더 디자인 */
                                 .header-line {{ border-bottom: 1.5px solid black; text-align: center; font-weight: bold; font-size: 12pt; padding-bottom: 5px; }}
                                 .title {{ text-align: center; font-size: 14pt; font-weight: bold; border-bottom: 1.5px solid black; padding-bottom: 8px; }}
                                 .footer-text {{ text-align: center; font-size: 9pt; color: gray; }}
                                 
-                                /* 지문을 감싸는 사각형 박스 디자인 */
-                                .passage-box {{ 
-                                    border: 1px solid black; 
-                                    padding: 10px; 
-                                    margin-top: 8px; 
-                                    margin-bottom: 8px; 
-                                    background-color: #ffffff;
+                                /* 💥 테이블을 이용한 무적의 지문 박스 디자인 */
+                                .passage-table {{
+                                    width: 100%;
+                                    border: 1px solid black;
+                                    margin-top: 10px;
+                                    margin-bottom: 10px;
                                 }}
-                                .question-block {{ margin-bottom: 30px; text-align: left; }}
+                                .passage-table td {{
+                                    padding: 8px;
+                                    line-height: 15pt;
+                                }}
+                                
+                                .question-block {{ margin-bottom: 20px; text-align: left; }}
                                 .answer-block {{ margin-bottom: 25px; text-align: left; }}
                             </style>
                         </head>
@@ -245,7 +250,7 @@ I am writing to you on behalf of the student council.
                             <div id="header_content">
                                 <div class="header-line">에스디에이치어학원 {header_title}</div>
                             </div>
-                            <!-- 하단 푸터 (페이지 번호 자동 생성) -->
+                            <!-- 하단 푸터 -->
                             <div id="footer_content">
                                 <div class="footer-text">
                                     - <pdf:pagenumber /> -<br/>
@@ -253,7 +258,7 @@ I am writing to you on behalf of the student council.
                                 </div>
                             </div>
                             
-                            <!-- 1. 박스 디자인이 적용된 시험지 영역 -->
+                            <!-- 1. 시험지 영역 -->
                             {questions_html}
                             
                             <!-- 2. 다음 페이지로 강제 분리 -->
@@ -271,7 +276,7 @@ I am writing to you on behalf of the student council.
                             st.error("PDF 생성 중 오류가 발생했습니다.")
                         else:
                             st.success("✅ 학원 전용 시험지 & 해설지 분리 생성이 완료되었습니다!")
-                            st.download_button("📥 완성된 PDF 다운로드", data=pdf_file.getvalue(), file_name="SDH_완벽디자인_변형문제.pdf", mime="application/pdf")
+                            st.download_button("📥 완성된 PDF 다운로드", data=pdf_file.getvalue(), file_name="SDH_최종_실전모의고사.pdf", mime="application/pdf")
                 except Exception as e:
                     st.error(f"오류가 발생했습니다: {e}")
 
