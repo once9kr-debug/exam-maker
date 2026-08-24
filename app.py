@@ -24,7 +24,7 @@ if not os.path.exists(font_path):
 
 # 공통 지문 DB (임시 샘플)
 mock_db = {
-    "18번": "Dear Mr. Jones, I am writing to you on behalf of the student council...",
+    "18번": "Dear Mr. Jones,\nI am writing to you on behalf of the student council...",
     "19번": "As I walked into the dark room, my heart started to beat faster...",
     "20번": "In today's fast-paced world, it is important to take time for yourself...",
     "21번": "The concept of 'social proof' dictates how we make decisions in groups...",
@@ -46,11 +46,11 @@ with tab_workbook:
     
     col1, col2, col3, col4 = st.columns(4)
     with col1:
-        grade = st.selectbox("학년", ["고1", "고2", "고3"], index=1)
+        grade_wb = st.selectbox("학년", ["고1", "고2", "고3"], index=1, key="wb_grade")
     with col2:
-        year = st.selectbox("연도", ["2026년", "2025년", "2024년", "2023년"])
+        year_wb = st.selectbox("연도", ["2026년", "2025년", "2024년", "2023년"], key="wb_year")
     with col3:
-        month = st.selectbox("시행 월", ["3월", "6월", "9월", "11월"])
+        month_wb = st.selectbox("시행 월", ["3월", "6월", "9월", "11월"], key="wb_month")
     with col4:
         st.write("") 
         search_btn = st.button("🔍 자료 검색", use_container_width=True)
@@ -58,44 +58,34 @@ with tab_workbook:
     st.markdown("---")
     
     if search_btn:
-        st.success(f"✅ {year} {month} {grade} 모의고사 워크북 목록을 불러왔습니다.")
+        st.success(f"✅ {year_wb} {month_wb} {grade_wb} 모의고사 워크북 목록을 불러왔습니다.")
         data = {
             "자료명": [
-                f"{year} {month} {grade} 모의고사 10단계 WORKBOOK 통합본",
-                f"{year} {month} {grade} 모의고사 WORKBOOK 1 지문연습",
-                f"{year} {month} {grade} 모의고사 WORKBOOK 2 빈칸완성",
-                f"{year} {month} {grade} 모의고사 WORKBOOK 3 해석연습",
-                f"{year} {month} {grade} 모의고사 WORKBOOK 4 순서배열"
+                f"{year_wb} {month_wb} {grade_wb} 모의고사 10단계 WORKBOOK 통합본",
+                f"{year_wb} {month_wb} {grade_wb} 모의고사 WORKBOOK 1 지문연습",
+                f"{year_wb} {month_wb} {grade_wb} 모의고사 WORKBOOK 2 빈칸완성"
             ],
-            "문항 수": [329, 45, 45, 45, 45],
-            "업로드일": ["2026-08-25"] * 5
+            "문항 수": [329, 45, 45],
+            "업로드일": ["2026-08-25"] * 3
         }
         df = pd.DataFrame(data)
         df.insert(0, "선택", False)
         
-        edited_df = st.data_editor(
-            df,
-            column_config={"선택": st.column_config.CheckboxColumn("선택", default=False)},
-            disabled=["자료명", "문항 수", "업로드일"],
-            hide_index=True,
-            use_container_width=True
-        )
-        if st.button("📥 선택 파일 다운로드 (테스트)", type="primary"):
-            st.info("선택하신 워크북 파일이 다운로드 되었습니다!")
+        st.data_editor(df, column_config={"선택": st.column_config.CheckboxColumn("선택", default=False)}, disabled=["자료명", "문항 수", "업로드일"], hide_index=True, use_container_width=True)
 
 # ==========================================
-# 탭 2: 내신 변형문제 출제 화면
+# 탭 2: 내신 변형문제 출제 화면 (진짜 모의고사 양식)
 # ==========================================
 with tab_exam:
     st.subheader("🎯 1. 출제 범위 선택 (모의고사)")
     
     exam_col1, exam_col2, exam_col3 = st.columns(3)
     with exam_col1:
-        st.selectbox("대상 학년", ["고1", "고2", "고3"], key="exam_grade", index=1)
+        exam_grade = st.selectbox("대상 학년", ["고1", "고2", "고3"], key="exam_grade", index=0)
     with exam_col2:
-        st.selectbox("모의고사 연도", ["2026년", "2025년", "2024년"], key="exam_year")
+        exam_year = st.selectbox("모의고사 연도", ["2026년", "2025년", "2024년"], key="exam_year")
     with exam_col3:
-        st.selectbox("시행 월", ["3월", "6월", "9월", "11월"], key="exam_month", index=1)
+        exam_month = st.selectbox("시행 월", ["3월", "6월", "9월", "11월"], key="exam_month", index=1)
         
     st.write("")
     select_all_q = st.checkbox("✅ **전체 지문 선택**", key="exam_all_q")
@@ -134,12 +124,13 @@ with tab_exam:
         elif not selected_types:
             st.warning("문제 유형을 1개 이상 선택해주세요.")
         else:
-            with st.spinner("AI가 시험지와 해설지를 분리하여 안전하게 제작하고 있습니다..."):
+            with st.spinner("AI가 실제 모의고사 양식(지문 박스 포함)으로 시험지를 디자인하고 있습니다..."):
                 passages_text = ""
                 for q in selected_q_nums:
                     text = mock_db.get(q, f"[{q} 지문 업데이트가 필요합니다]")
                     passages_text += f"[{q}]\n{text}\n\n"
 
+                # 프롬프트: 지문을 [박스시작]과 [박스끝]으로 감싸도록 강제
                 prompt = f'''당신은 고등학교 내신 영어 출제 전문가입니다. 제공된 지문으로 선택된 문제 유형의 변형 문제를 만드세요.
 
 [선택된 문제 유형]
@@ -148,55 +139,69 @@ with tab_exam:
 [지문 목록]
 {passages_text}
 
-[출력 규칙 및 필수 사항]
-1. 마크다운이나 HTML 태그를 절대 쓰지 마세요.
-2. 각 문제는 반드시 "[문제]" 로 시작하고, 정답은 "[정답]" 으로 시작하세요.
-3. 각 문제가 끝날 때마다 반드시 "---문제구분선---" 을 넣어주세요.
-4. 빈칸을 만들 때 밑줄은 반드시 `_____` (밑줄 5개)만 사용하세요.
-5. 선택지는 반드시 원문자(①, ②, ③, ④, ⑤)를 사용하세요.
+[출력 규칙 및 필수 사항 - 매우 중요]
+1. 절대 HTML 태그를 사용하지 마세요.
+2. 각 문제는 반드시 아래의 [출력 포맷 예시]와 100% 동일한 구조로 작성하세요.
+3. 지문 내용은 반드시 "[박스시작]"과 "[박스끝]" 사이에 넣으세요.
+4. 빈칸 밑줄은 반드시 `_____` (밑줄 5개)만 사용하세요.
 
-출력 예시:
-[문제] Q1. 다음 글의 밑줄 친 부분 중, 어법상 틀린 것은?
-(지문 내용)
-① 선택지내용
-② 선택지내용
-[정답] Q1. 1
-[해설] 해설내용
----문제구분선---
+[출력 포맷 예시]
+[문제시작]
+1. 다음 글의 목적으로 가장 적절한 것은?
+[박스시작]
+Dear Residents,
+I am writing to you on behalf of the student council.
+[박스끝]
+① 선택지 1
+② 선택지 2
+③ 선택지 3
+④ 선택지 4
+⑤ 선택지 5
+[정답시작]
+1
+[해설시작]
+여기에 해설을 작성하세요.
+[문제끝]
 '''
                 try:
                     model = genai.GenerativeModel('gemini-3.6-flash')
                     response = model.generate_content(prompt)
                     
                     raw_text = response.text.replace('```html', '').replace('```', '')
-                    problems = raw_text.split('---문제구분선---')
+                    problems = raw_text.split('[문제끝]')
                     
                     questions_html = ""
-                    answers_html = "<div class='section-title'>📝 정답 및 해설</div><br/>"
+                    answers_html = "<div class='title'>정답 및 해설</div><br/><br/>"
                     
                     for prob in problems:
-                        if prob.strip():
-                            clean_text = prob.strip().replace('<', '&lt;').replace('>', '&gt;')
+                        if '[문제시작]' not in prob: continue
+                        try:
+                            # AI가 보낸 텍스트를 정확하게 3등분(문제, 정답, 해설)으로 쪼개기
+                            q_main = prob.split('[문제시작]')[1].split('[정답시작]')[0].strip()
+                            ans_part = prob.split('[정답시작]')[1].split('[해설시작]')[0].strip()
+                            exp_part = prob.split('[해설시작]')[1].strip()
                             
-                            if '[정답]' in clean_text:
-                                parts = clean_text.split('[정답]')
-                                q_part = parts[0].replace('[문제]', '').strip()
-                                a_part = '[정답] ' + parts[1].strip()
-                            else:
-                                q_part = clean_text.replace('[문제]', '').strip()
-                                a_part = "정답 및 해설을 찾을 수 없습니다."
-                                
-                            q_part = q_part.replace('\n', '<br/>')
-                            a_part = a_part.replace('\n', '<br/>').replace('[정답]', '<b>[정답]</b>').replace('[해설]', '<br/><b>[해설]</b>')
+                            # 1. 문제지 파트 조립 (특수문자 처리 및 줄바꿈 적용)
+                            q_html = q_main.replace('<', '&lt;').replace('>', '&gt;')
+                            q_html = q_html.replace('\n', '<br/>')
+                            # [박스시작]과 [박스끝]을 실제 검은색 테두리 CSS 박스로 변환!
+                            q_html = q_html.replace('[박스시작]', '<div class="passage-box">')
+                            q_html = q_html.replace('[박스끝]', '</div>')
                             
-                            # 글자가 허공으로 튀는 것을 막기 위해 div를 안전한 텍스트 묶음으로 처리
-                            questions_html += f"<div class='question-box'>{q_part}</div>"
-                            answers_html += f"<div class='question-box'>{a_part}</div>"
+                            questions_html += f"<div class='question-block'>{q_html}</div>"
+                            
+                            # 2. 해설지 파트 조립
+                            a_html = exp_part.replace('<', '&lt;').replace('>', '&gt;').replace('\n', '<br/>')
+                            answers_html += f"<div class='answer-block'><b>[정답] {ans_part}</b><br/><b>[해설]</b> {a_html}</div>"
+                        except:
+                            continue
 
-                    st.subheader("📝 생성된 시험지 미리보기")
-                    st.write(raw_text.replace('---문제구분선---', '\n\n---\n\n'))
+                    st.subheader("📝 생성된 시험지 텍스트 미리보기")
+                    st.write(raw_text.replace('[박스시작]', '---지문 시작---').replace('[박스끝]', '---지문 끝---'))
                     
-                    with st.spinner("PDF 엔진 오류를 차단하고 정밀 인쇄 중입니다..."):
+                    with st.spinner("완벽한 2단 박스 레이아웃으로 PDF를 인쇄 중입니다..."):
+                        
+                        header_title = f"{exam_year} {exam_month} {exam_grade} 모의고사 변형문제"
                         
                         html_content = f'''
                         <!DOCTYPE html>
@@ -208,35 +213,53 @@ with tab_exam:
                                 body {{ 
                                     font-family: 'NanumGothic'; 
                                     font-size: 10pt; 
-                                    line-height: 18pt; /* 줄 높이를 픽셀로 강제 고정하여 겹침 방지 */
+                                    line-height: 1.5; 
                                     color: #000000; 
                                 }}
                                 @page {{
                                     size: A4 portrait; margin: 0;
-                                    @frame header_frame {{ -pdf-frame-content: header_content; left: 40pt; width: 515pt; top: 30pt; height: 30pt; }}
-                                    @frame col1_frame {{ left: 40pt; width: 240pt; top: 80pt; height: 710pt; }}
-                                    @frame col2_frame {{ left: 315pt; width: 240pt; top: 80pt; height: 710pt; }}
-                                    @frame footer_frame {{ -pdf-frame-content: footer_content; left: 40pt; width: 515pt; top: 800pt; height: 20pt; }}
+                                    @frame header_frame {{ -pdf-frame-content: header_content; left: 40pt; width: 515pt; top: 30pt; height: 35pt; }}
+                                    @frame col1_frame {{ left: 40pt; width: 240pt; top: 70pt; height: 720pt; }}
+                                    @frame col2_frame {{ left: 315pt; width: 240pt; top: 70pt; height: 720pt; }}
+                                    @frame footer_frame {{ -pdf-frame-content: footer_content; left: 40pt; width: 515pt; top: 805pt; height: 20pt; }}
                                 }}
+                                /* 진짜 모의고사 같은 헤더 디자인 */
+                                .header-line {{ border-bottom: 1.5px solid black; text-align: center; font-weight: bold; font-size: 12pt; padding-bottom: 5px; }}
                                 .title {{ text-align: center; font-size: 14pt; font-weight: bold; border-bottom: 1.5px solid black; padding-bottom: 8px; }}
-                                .section-title {{ text-align: center; font-size: 13pt; font-weight: bold; background-color: #f0f0f0; padding: 5px; }}
                                 .footer-text {{ text-align: center; font-size: 9pt; color: gray; }}
                                 
-                                /* 💥 핵심 처방: 글씨 겹침 버그의 주범이었던 justify 정렬을 무조건 left로 고정 */
-                                .question-box {{ margin-bottom: 30pt; text-align: left; word-wrap: break-word; }}
+                                /* 지문을 감싸는 사각형 박스 디자인 */
+                                .passage-box {{ 
+                                    border: 1px solid black; 
+                                    padding: 10px; 
+                                    margin-top: 8px; 
+                                    margin-bottom: 8px; 
+                                    background-color: #ffffff;
+                                }}
+                                .question-block {{ margin-bottom: 30px; text-align: left; }}
+                                .answer-block {{ margin-bottom: 25px; text-align: left; }}
                             </style>
                         </head>
                         <body>
-                            <div id="header_content"><div class="title">에스디에이치어학원 모의고사 변형문제</div></div>
-                            <div id="footer_content"><div class="footer-text">SDH Premium Decoding & Internal Exam System</div></div>
+                            <!-- 상단 헤더 -->
+                            <div id="header_content">
+                                <div class="header-line">에스디에이치어학원 {header_title}</div>
+                            </div>
+                            <!-- 하단 푸터 (페이지 번호 자동 생성) -->
+                            <div id="footer_content">
+                                <div class="footer-text">
+                                    - <pdf:pagenumber /> -<br/>
+                                    SDH Premium Decoding & Internal Exam System
+                                </div>
+                            </div>
                             
-                            <!-- 시험지 영역 -->
+                            <!-- 1. 박스 디자인이 적용된 시험지 영역 -->
                             {questions_html}
                             
-                            <!-- 여기서 종이를 잘라서 강제로 다음 페이지로 넘김 -->
+                            <!-- 2. 다음 페이지로 강제 분리 -->
                             <pdf:nextpage />
                             
-                            <!-- 해설지 영역 -->
+                            <!-- 3. 해설지 영역 -->
                             {answers_html}
                         </body>
                         </html>
@@ -248,7 +271,7 @@ with tab_exam:
                             st.error("PDF 생성 중 오류가 발생했습니다.")
                         else:
                             st.success("✅ 학원 전용 시험지 & 해설지 분리 생성이 완료되었습니다!")
-                            st.download_button("📥 완성된 PDF 다운로드", data=pdf_file.getvalue(), file_name="SDH_변형문제_해설지포함.pdf", mime="application/pdf")
+                            st.download_button("📥 완성된 PDF 다운로드", data=pdf_file.getvalue(), file_name="SDH_완벽디자인_변형문제.pdf", mime="application/pdf")
                 except Exception as e:
                     st.error(f"오류가 발생했습니다: {e}")
 
