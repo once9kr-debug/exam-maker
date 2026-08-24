@@ -134,13 +134,12 @@ with tab_exam:
         elif not selected_types:
             st.warning("문제 유형을 1개 이상 선택해주세요.")
         else:
-            with st.spinner("AI가 SDH Premium 스타일의 시험지와 해설지를 분리하여 제작하고 있습니다..."):
+            with st.spinner("AI가 시험지와 해설지를 분리하여 안전하게 제작하고 있습니다..."):
                 passages_text = ""
                 for q in selected_q_nums:
                     text = mock_db.get(q, f"[{q} 지문 업데이트가 필요합니다]")
                     passages_text += f"[{q}]\n{text}\n\n"
 
-                # 프롬프트 강화: 문제와 정답을 파이썬이 쉽게 쪼갤 수 있도록 [문제] 태그 강제
                 prompt = f'''당신은 고등학교 내신 영어 출제 전문가입니다. 제공된 지문으로 선택된 문제 유형의 변형 문제를 만드세요.
 
 [선택된 문제 유형]
@@ -172,37 +171,33 @@ with tab_exam:
                     raw_text = response.text.replace('```html', '').replace('```', '')
                     problems = raw_text.split('---문제구분선---')
                     
-                    # 1. 문제지와 정답지 분리 조립
                     questions_html = ""
-                    answers_html = "<div class='section-title'>📝 정답 및 해설</div><br/><br/>"
+                    answers_html = "<div class='section-title'>📝 정답 및 해설</div><br/>"
                     
                     for prob in problems:
                         if prob.strip():
                             clean_text = prob.strip().replace('<', '&lt;').replace('>', '&gt;')
                             
-                            # [정답] 이라는 글자를 기준으로 앞(문제)과 뒤(해설)를 싹둑 자름
                             if '[정답]' in clean_text:
                                 parts = clean_text.split('[정답]')
                                 q_part = parts[0].replace('[문제]', '').strip()
-                                a_part = '[정답]' + parts[1].strip()
+                                a_part = '[정답] ' + parts[1].strip()
                             else:
                                 q_part = clean_text.replace('[문제]', '').strip()
-                                a_part = "정답/해설 생성 실패"
+                                a_part = "정답 및 해설을 찾을 수 없습니다."
                                 
-                            # 엔터를 HTML 줄바꿈으로 변경
                             q_part = q_part.replace('\n', '<br/>')
                             a_part = a_part.replace('\n', '<br/>').replace('[정답]', '<b>[정답]</b>').replace('[해설]', '<br/><b>[해설]</b>')
                             
-                            # 상자(div)에 가두지 않고 순수 텍스트로 흘려보냄 (글씨 위로 튀는 현상 완벽 방지)
-                            questions_html += f'{q_part}<br/><br/><br/>'
-                            answers_html += f'{a_part}<br/><br/><br/>'
+                            # 글자가 허공으로 튀는 것을 막기 위해 div를 안전한 텍스트 묶음으로 처리
+                            questions_html += f"<div class='question-box'>{q_part}</div>"
+                            answers_html += f"<div class='question-box'>{a_part}</div>"
 
                     st.subheader("📝 생성된 시험지 미리보기")
                     st.write(raw_text.replace('---문제구분선---', '\n\n---\n\n'))
                     
-                    with st.spinner("시험지와 해설지를 각각 분리하여 정밀 인쇄 중입니다..."):
+                    with st.spinner("PDF 엔진 오류를 차단하고 정밀 인쇄 중입니다..."):
                         
-                        # 2. PDF 조립 ( <pdf:nextpage /> 를 사용해 페이지 강제 분리 )
                         html_content = f'''
                         <!DOCTYPE html>
                         <html>
@@ -213,33 +208,35 @@ with tab_exam:
                                 body {{ 
                                     font-family: 'NanumGothic'; 
                                     font-size: 10pt; 
-                                    line-height: 1.6; 
+                                    line-height: 18pt; /* 줄 높이를 픽셀로 강제 고정하여 겹침 방지 */
                                     color: #000000; 
                                 }}
                                 @page {{
                                     size: A4 portrait; margin: 0;
                                     @frame header_frame {{ -pdf-frame-content: header_content; left: 40pt; width: 515pt; top: 30pt; height: 30pt; }}
-                                    @frame col1_frame {{ left: 40pt; width: 245pt; top: 80pt; height: 710pt; }}
-                                    @frame col2_frame {{ left: 310pt; width: 245pt; top: 80pt; height: 710pt; }}
+                                    @frame col1_frame {{ left: 40pt; width: 240pt; top: 80pt; height: 710pt; }}
+                                    @frame col2_frame {{ left: 315pt; width: 240pt; top: 80pt; height: 710pt; }}
                                     @frame footer_frame {{ -pdf-frame-content: footer_content; left: 40pt; width: 515pt; top: 800pt; height: 20pt; }}
                                 }}
                                 .title {{ text-align: center; font-size: 14pt; font-weight: bold; border-bottom: 1.5px solid black; padding-bottom: 8px; }}
                                 .section-title {{ text-align: center; font-size: 13pt; font-weight: bold; background-color: #f0f0f0; padding: 5px; }}
                                 .footer-text {{ text-align: center; font-size: 9pt; color: gray; }}
+                                
+                                /* 💥 핵심 처방: 글씨 겹침 버그의 주범이었던 justify 정렬을 무조건 left로 고정 */
+                                .question-box {{ margin-bottom: 30pt; text-align: left; word-wrap: break-word; }}
                             </style>
                         </head>
                         <body>
-                            <!-- 헤더 & 푸터 (모든 페이지 공통) -->
                             <div id="header_content"><div class="title">에스디에이치어학원 모의고사 변형문제</div></div>
                             <div id="footer_content"><div class="footer-text">SDH Premium Decoding & Internal Exam System</div></div>
                             
-                            <!-- 1. 문제지 출력 부분 -->
+                            <!-- 시험지 영역 -->
                             {questions_html}
                             
-                            <!-- 2. 여기서 종이를 싹둑 자르고 다음 페이지로 넘어감 -->
+                            <!-- 여기서 종이를 잘라서 강제로 다음 페이지로 넘김 -->
                             <pdf:nextpage />
                             
-                            <!-- 3. 해설지 출력 부분 -->
+                            <!-- 해설지 영역 -->
                             {answers_html}
                         </body>
                         </html>
