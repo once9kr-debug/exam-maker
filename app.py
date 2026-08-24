@@ -73,7 +73,7 @@ with tab_workbook:
         st.data_editor(df, column_config={"선택": st.column_config.CheckboxColumn("선택", default=False)}, disabled=["자료명", "문항 수", "업로드일"], hide_index=True, use_container_width=True)
 
 # ==========================================
-# 탭 2: 내신 변형문제 출제 화면 (진짜 모의고사 양식)
+# 탭 2: 내신 변형문제 출제 화면
 # ==========================================
 with tab_exam:
     st.subheader("🎯 1. 출제 범위 선택 (모의고사)")
@@ -123,12 +123,13 @@ with tab_exam:
         elif not selected_types:
             st.warning("문제 유형을 1개 이상 선택해주세요.")
         else:
-            with st.spinner("AI가 가장 안정적인 2단 레이아웃으로 시험지를 설계하고 있습니다..."):
+            with st.spinner("AI가 밑줄과 선택지 기호를 완벽히 챙겨서 시험지를 디자인 중입니다..."):
                 passages_text = ""
                 for q in selected_q_nums:
                     text = mock_db.get(q, f"[{q} 지문 업데이트가 필요합니다]")
                     passages_text += f"[{q}]\n{text}\n\n"
 
+                # 💥 강력해진 프롬프트: 원문자 기호와 <u> 태그 강제 지시
                 prompt = f'''당신은 고등학교 내신 영어 출제 전문가입니다. 제공된 지문으로 선택된 문제 유형의 변형 문제를 만드세요.
 
 [선택된 문제 유형]
@@ -138,23 +139,24 @@ with tab_exam:
 {passages_text}
 
 [출력 규칙 및 필수 사항 - 매우 중요]
-1. 절대 마크다운이나 HTML 태그를 사용하지 마세요.
-2. 각 문제는 반드시 아래의 [출력 포맷 예시]와 100% 동일한 구조로 작성하세요.
-3. 지문 내용은 반드시 "[박스시작]"과 "[박스끝]" 사이에 넣으세요.
-4. 빈칸 밑줄은 반드시 `_____` (밑줄 5개)만 사용하세요.
+1. 각 문제는 반드시 아래의 [출력 포맷 예시]와 100% 동일한 구조로 작성하세요.
+2. 지문 내용은 반드시 "[박스시작]"과 "[박스끝]" 사이에 넣으세요.
+3. 객관식 문제의 선택지는 반드시 원문자(①, ②, ③, ④, ⑤) 기호로 시작하세요. 절대 누락하지 마세요.
+4. 지문 안에서 어법, 어휘 등 밑줄을 그어야 하는 부분은 반드시 `<u>` 태그를 사용하세요. (예시: I am <u>writing</u> a letter.)
+5. 빈칸 추론 문제의 빈칸은 밑줄 5개(`_____`)를 사용하세요.
 
 [출력 포맷 예시]
 [문제시작]
-1. 다음 글의 목적으로 가장 적절한 것은?
+1. 다음 글의 밑줄 친 부분 중, 어법상 틀린 것은?
 [박스시작]
 Dear Residents,
-I am writing to you on behalf of the student council.
+I am <u>pleased</u> to invite you to our book donation drive.
 [박스끝]
-① 선택지 1
-② 선택지 2
-③ 선택지 3
-④ 선택지 4
-⑤ 선택지 5
+① pleased
+② collecting
+③ donating
+④ condition
+⑤ while
 [정답시작]
 1
 [해설시작]
@@ -174,36 +176,39 @@ I am writing to you on behalf of the student council.
                     for prob in problems:
                         if '[문제시작]' not in prob: continue
                         try:
-                            # 텍스트 3등분
                             q_main = prob.split('[문제시작]')[1].split('[정답시작]')[0].strip()
                             ans_part = prob.split('[정답시작]')[1].split('[해설시작]')[0].strip()
                             exp_part = prob.split('[해설시작]')[1].strip()
                             
-                            # 문제 번호 추출
                             q_num_text = q_main.split('\n')[0].strip()
                             
-                            # 1. 문제지 파트 조립 (포장지를 모두 찢고 순수 텍스트로 나열)
+                            # 💥 핵심 처방: < > 기호들을 치환하되, 밑줄 태그(<u>, </u>)는 살려냅니다!
                             q_html = q_main.replace('<', '&lt;').replace('>', '&gt;')
+                            q_html = q_html.replace('&lt;u&gt;', '<u>').replace('&lt;/u&gt;', '</u>')
+                            q_html = q_html.replace('&lt;U&gt;', '<u>').replace('&lt;/U&gt;', '</u>')
+                            
+                            # 엔터를 줄바꿈 태그로 변환
                             q_html = q_html.replace('\n', '<br/>')
                             
-                            # 💥 핵심 처방: 지문 박스만 얇은 선으로 그리고, 전체를 감싸는 덩어리(div)는 완전히 제거
-                            box_style = 'border: 0.5px solid black; padding: 10px; margin: 10px 0; background-color: #ffffff;'
-                            q_html = q_html.replace('[박스시작]', f'<div style="{box_style}">')
-                            q_html = q_html.replace('[박스끝]', '</div>')
+                            # 💥 핵심 처방: 박스 위아래로 생기는 불필요한 줄바꿈(<br/>) 싹둑 자르기
+                            q_html = q_html.replace('[박스시작]<br/>', '[박스시작]')
+                            q_html = q_html.replace('<br/>[박스끝]', '[박스끝]')
                             
-                            # 문제 덩어리를 묶지 않고 그대로 흘려보냄 (겹침 100% 차단)
-                            questions_html += f"{q_html}<br/><br/><br/>"
+                            # 쫀쫀하고 튼튼하게 지문 길이에 딱 맞는 테이블 박스
+                            q_html = q_html.replace('[박스시작]', '<table class="passage-table"><tr><td>')
+                            q_html = q_html.replace('[박스끝]', '</td></tr></table>')
                             
-                            # 2. 해설지 파트 조립
+                            questions_html += f"<div class='question-block'>{q_html}</div>"
+                            
                             a_html = exp_part.replace('<', '&lt;').replace('>', '&gt;').replace('\n', '<br/>')
-                            answers_html += f"<b>[정답] {q_num_text} - {ans_part}</b><br/><b>[해설]</b> {a_html}<br/><br/><br/>"
+                            answers_html += f"<div class='answer-block'><b>[정답] {q_num_text} - {ans_part}</b><br/><b>[해설]</b> {a_html}</div>"
                         except Exception as e:
                             continue
 
                     st.subheader("📝 생성된 시험지 텍스트 미리보기")
-                    st.write(raw_text.replace('[박스시작]', '---지문 시작---').replace('[박스끝]', '---지문 끝---'))
+                    st.write(raw_text.replace('[박스시작]', '---지문 시작---').replace('[박스끝]', '---지문 끝---'), unsafe_allow_html=True)
                     
-                    with st.spinner("겹침 현상을 원천 차단하고 PDF를 인쇄 중입니다..."):
+                    with st.spinner("가장 완벽한 레이아웃으로 PDF를 인쇄 중입니다..."):
                         
                         header_title = f"{exam_year} {exam_month} {exam_grade} 모의고사 변형문제"
                         
@@ -230,6 +235,21 @@ I am writing to you on behalf of the student council.
                                 .header-line {{ border-bottom: 1.5px solid black; text-align: center; font-weight: bold; font-size: 12pt; padding-bottom: 5px; }}
                                 .title {{ text-align: center; font-size: 14pt; font-weight: bold; border-bottom: 1.5px solid black; padding-bottom: 8px; }}
                                 .footer-text {{ text-align: center; font-size: 9pt; color: gray; }}
+                                
+                                /* 지문 길이에 유연하게 맞춰지는 컴팩트한 박스 */
+                                .passage-table {{
+                                    width: 100%;
+                                    border: 1px solid black;
+                                    margin-top: 5px;
+                                    margin-bottom: 10px;
+                                }}
+                                .passage-table td {{
+                                    padding: 8px; /* 안쪽 여백을 줄여서 쫀쫀하게 만듦 */
+                                    line-height: 1.5;
+                                }}
+                                
+                                .question-block {{ margin-bottom: 25px; text-align: left; }}
+                                .answer-block {{ margin-bottom: 25px; text-align: left; }}
                             </style>
                         </head>
                         <body>
@@ -243,13 +263,10 @@ I am writing to you on behalf of the student council.
                                 </div>
                             </div>
                             
-                            <!-- 1. 겹침 없이 물 흐르듯 자연스럽게 떨어지는 시험지 영역 -->
                             {questions_html}
                             
-                            <!-- 2. 다음 페이지로 강제 분리 -->
                             <pdf:nextpage />
                             
-                            <!-- 3. 해설지 영역 -->
                             {answers_html}
                         </body>
                         </html>
@@ -261,7 +278,7 @@ I am writing to you on behalf of the student council.
                             st.error("PDF 생성 중 오류가 발생했습니다.")
                         else:
                             st.success("✅ 오류가 완벽히 해결된 시험지 생성이 완료되었습니다!")
-                            st.download_button("📥 완성된 PDF 다운로드", data=pdf_file.getvalue(), file_name="SDH_최종_실전모의고사.pdf", mime="application/pdf")
+                            st.download_button("📥 완성된 PDF 다운로드", data=pdf_file.getvalue(), file_name="SDH_퍼펙트_실전모의고사.pdf", mime="application/pdf")
                 except Exception as e:
                     st.error(f"오류가 발생했습니다: {e}")
 
