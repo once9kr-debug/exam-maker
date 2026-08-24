@@ -23,7 +23,7 @@ if not os.path.exists(font_path):
 st.title("에스디에이치어학원 내신 출제 마법사")
 st.markdown("---")
 
-# 1. 모의고사 지문 DB
+# 1. 모의고사 지문 DB (샘플)
 mock_db = {
     "18번": "Dear Mr. Jones, I am writing to you on behalf of the student council...",
     "19번": "As I walked into the dark room, my heart started to beat faster...",
@@ -70,7 +70,7 @@ with type_col4:
 
 st.markdown("---")
 
-# 4. 문제 생성 및 고급 2단 PDF 변환 로직
+# 4. 문제 생성 및 완벽 고정 2단 PDF 변환
 if st.button("문제 생성 및 PDF 다운로드", type="primary"):
     if not selected_q_nums:
         st.warning("출제할 모의고사 지문 번호를 1개 이상 선택해주세요.")
@@ -84,8 +84,8 @@ if st.button("문제 생성 및 PDF 다운로드", type="primary"):
                 text = mock_db.get(q, f"[{q} 지문 업데이트가 필요합니다]")
                 passages_text += f"[{q}]\n{text}\n\n"
 
-            # 프롬프트: AI가 HTML을 쓰지 못하도록 원천 차단하고 텍스트만 받음
-            prompt = f'''당신은 고등학교 내신 영어 출제 전문가입니다. 제공된 모의고사 지문들을 바탕으로 선택된 문제 유형의 변형 문제를 만들어주세요.
+            # AI 프롬프트 족쇄 채우기 (긴 밑줄, 특수기호 차단)
+            prompt = f'''당신은 고등학교 내신 영어 출제 전문가입니다. 제공된 지문으로 선택된 문제 유형의 변형 문제를 만드세요.
 
 [선택된 문제 유형]
 {', '.join(selected_types)}
@@ -94,94 +94,118 @@ if st.button("문제 생성 및 PDF 다운로드", type="primary"):
 {passages_text}
 
 [출력 규칙 및 필수 사항] (매우 중요)
-1. 절대 마크다운(```)이나 HTML 태그(table, div 등)를 사용하지 마세요. 오직 순수 텍스트만 작성하세요.
-2. 각 문제가 끝날 때마다 반드시 "---문제구분선---" 이라는 텍스트를 정확하게 넣어주세요.
+1. 마크다운이나 HTML 태그를 절대 쓰지 마세요.
+2. 각 문제 끝에 반드시 "---문제구분선---" 을 넣어주세요.
+3. 빈칸을 만들 때 밑줄을 너무 길게 쓰지 마세요. 반드시 `_____` (밑줄 5개)만 사용하세요.
+4. 선택지는 반드시 원문자(①, ②, ③, ④, ⑤)를 사용하세요.
 
 출력 예시:
-Q1. 다음 글을 읽고...
+Q1. 다음 글의 밑줄 친 부분 중, 어법상 틀린 것은?
 (지문 내용)
-① 번 선택지
-② 번 선택지
+① 선택지내용
+② 선택지내용
 [정답] 1
-[해설] 해설 내용입니다.
+[해설] 해설내용
 ---문제구분선---
-Q2. 다음 중 어법상...
 '''
             
             try:
                 model = genai.GenerativeModel('gemini-3.6-flash')
                 response = model.generate_content(prompt)
                 
-                # AI 답변에서 HTML 찌꺼기를 제거하고 문제별로 자르기
                 raw_text = response.text.replace('```html', '').replace('```', '')
                 problems = raw_text.split('---문제구분선---')
                 
                 st.subheader("생성된 시험지 미리보기")
                 st.write(raw_text.replace('---문제구분선---', '\n\n---\n\n'))
                 
-                with st.spinner("실제 모의고사 형태의 2단 PDF를 굽고 있습니다..."):
+                with st.spinner("2단 모의고사 포맷으로 정밀 인쇄 중입니다..."):
                     
-                    # 파이썬이 직접 안전한 HTML로 조립
+                    # 파이썬으로 안전하게 조립
                     formatted_problems_html = ""
                     for prob in problems:
                         if prob.strip():
-                            # 태그 꼬임 방지를 위한 안전 처리
                             clean_text = prob.strip().replace('<', '&lt;').replace('>', '&gt;')
                             clean_text = clean_text.replace('\n', '<br>')
+                            # 정답과 해설 부분 볼드 처리로 가독성 상승
+                            clean_text = clean_text.replace('[정답]', '<br><br><b>[정답]</b>')
+                            clean_text = clean_text.replace('[해설]', '<br><b>[해설]</b>')
                             formatted_problems_html += f'<div class="question">{clean_text}</div>'
                     
-                    # xhtml2pdf 완벽 2단 레이아웃 CSS (줄간격/여백 안정화)
+                    # 완벽한 pt 단위의 2단 프레임 CSS (글자 겹침 원천 차단)
                     html_content = f'''
+                    <!DOCTYPE html>
                     <html>
                     <head>
                         <meta charset="utf-8">
                         <style>
-                            @font-face {{ font-family: 'NanumGothic'; src: url('{font_path}'); }}
+                            @font-face {{
+                                font-family: 'NanumGothic';
+                                src: url('{font_path}');
+                            }}
+                            body {{
+                                font-family: 'NanumGothic';
+                                font-size: 10pt;
+                                line-height: 1.5;
+                                color: #000000;
+                            }}
                             
+                            /* A4 용지 위의 좌표를 절대값(pt)으로 고정 */
                             @page {{
-                                size: A4;
+                                size: A4 portrait;
                                 margin: 0;
-                                @frame header {{
+                                
+                                /* 헤더 고정 영역 */
+                                @frame header_frame {{
                                     -pdf-frame-content: header_content;
-                                    top: 1cm; left: 1.5cm; right: 1.5cm; height: 1cm;
+                                    left: 40pt; width: 515pt; top: 30pt; height: 30pt;
                                 }}
-                                @frame footer {{
+                                
+                                /* 왼쪽 1단 영역 (폭 245pt) */
+                                @frame col1_frame {{
+                                    left: 40pt; width: 245pt; top: 75pt; height: 715pt;
+                                }}
+                                
+                                /* 오른쪽 2단 영역 (폭 245pt) */
+                                @frame col2_frame {{
+                                    left: 310pt; width: 245pt; top: 75pt; height: 715pt;
+                                }}
+                                
+                                /* 푸터 고정 영역 */
+                                @frame footer_frame {{
                                     -pdf-frame-content: footer_content;
-                                    bottom: 1cm; left: 1.5cm; right: 1.5cm; height: 1cm;
-                                }}
-                                @frame col1 {{
-                                    left: 1.5cm; width: 8.5cm; top: 2.5cm; bottom: 2.5cm;
-                                }}
-                                @frame col2 {{
-                                    left: 11cm; width: 8.5cm; top: 2.5cm; bottom: 2.5cm;
+                                    left: 40pt; width: 515pt; top: 800pt; height: 20pt;
                                 }}
                             }}
                             
-                            body {{ 
-                                font-family: 'NanumGothic'; 
-                                font-size: 10pt; 
-                                line-height: 1.5; 
+                            .title {{
+                                text-align: center;
+                                font-size: 14pt;
+                                font-weight: bold;
+                                border-bottom: 1.5px solid black;
+                                padding-bottom: 8px;
                             }}
-                            .title {{ 
-                                text-align: center; 
-                                font-size: 14pt; 
-                                font-weight: bold; 
-                                border-bottom: 1px solid black; 
-                                padding-bottom: 5px; 
+                            .footer-text {{
+                                text-align: center;
+                                font-size: 9pt;
+                                color: gray;
                             }}
-                            .question {{ 
-                                margin-bottom: 25px; 
-                                text-align: justify;
+                            .question {{
+                                margin-bottom: 25px;
+                                text-align: left;
+                                word-wrap: break-word; /* 글자가 상자 밖으로 나가는 것 방지 */
                             }}
                         </style>
                     </head>
                     <body>
-                        <div id="header_content" class="title">에스디에이치어학원 내신 변형문제</div>
-                        <div id="footer_content" style="text-align: center; font-size: 9pt; color: gray;">
-                            SDH Premium Decoding & Internal Exam System
+                        <div id="header_content">
+                            <div class="title">에스디에이치어학원 모의고사 변형문제</div>
+                        </div>
+                        <div id="footer_content">
+                            <div class="footer-text">SDH Premium Decoding & Internal Exam System</div>
                         </div>
                         
-                        <!-- 조립된 문제들이 1단 -> 2단 순서로 안전하게 흘러들어갑니다 -->
+                        <!-- 2단 프레임으로 자동 분배되는 본문 -->
                         {formatted_problems_html}
                         
                     </body>
