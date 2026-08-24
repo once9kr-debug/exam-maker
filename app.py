@@ -175,22 +175,17 @@ Q1. 다음 글의 밑줄 친 부분 중, 어법상 틀린 것은?
                     
                     with st.spinner("2단 모의고사 포맷으로 정밀 인쇄 중입니다..."):
                         
-                        # 핵심 처방: 글자들을 안전한 문단(p) 블록으로 포장하여 높이 계산 오류 방지
+                        # 💥 핵심 처방: 엔진이 소화 불량에 걸리지 않도록 가장 단순하고 안전한 구조로 변경
                         formatted_problems_html = ""
                         for prob in problems:
                             if prob.strip():
                                 clean_text = prob.strip().replace('<', '&lt;').replace('>', '&gt;')
+                                # 모든 줄바꿈을 안전한 <br/> 태그로 일괄 변경
+                                clean_text = clean_text.replace('\n', '<br/>')
+                                clean_text = clean_text.replace('[정답]', '<br/><br/><b>[정답]</b>')
+                                clean_text = clean_text.replace('[해설]', '<br/><b>[해설]</b>')
                                 
-                                prob_html = ""
-                                for line in clean_text.split('\n'):
-                                    if line.strip():
-                                        line = line.replace('[정답]', '<br><br><b>[정답]</b>')
-                                        line = line.replace('[해설]', '<br><b>[해설]</b>')
-                                        prob_html += f"<p>{line}</p>"
-                                    else:
-                                        prob_html += "<br>"
-                                        
-                                formatted_problems_html += f'<div class="question">{prob_html}</div>'
+                                formatted_problems_html += f'<div class="question">{clean_text}</div><br/>'
                         
                         html_content = f'''
                         <!DOCTYPE html>
@@ -204,8 +199,8 @@ Q1. 다음 글의 밑줄 친 부분 중, 어법상 틀린 것은?
                                     font-size: 10pt; 
                                     line-height: 1.5; 
                                     color: #000000; 
-                                    /* 핵심 처방전 2: 아시아권 언어 줄바꿈 강제 */
-                                    -pdf-word-wrap: CJK; 
+                                    word-wrap: break-word; 
+                                    -pdf-word-wrap: CJK;
                                 }}
                                 @page {{
                                     size: A4 portrait; margin: 0;
@@ -217,7 +212,6 @@ Q1. 다음 글의 밑줄 친 부분 중, 어법상 틀린 것은?
                                 .title {{ text-align: center; font-size: 14pt; font-weight: bold; border-bottom: 1.5px solid black; padding-bottom: 8px; }}
                                 .footer-text {{ text-align: center; font-size: 9pt; color: gray; }}
                                 .question {{ margin-bottom: 25px; text-align: justify; }}
-                                p {{ margin: 0 0 4px 0; padding: 0; }} /* 문단 간격 최소화 */
                             </style>
                         </head>
                         <body>
