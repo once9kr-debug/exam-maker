@@ -41,7 +41,7 @@ if st.button("문제 생성 및 PDF 다운로드"):
 지문: {passage}'''
             
             try:
-                model = genai.GenerativeModel('gemini-2.0-flash')
+                model = genai.GenerativeModel('gemini-3.6-flash')
                 response = model.generate_content(prompt)
                 result_text = response.text
                 
