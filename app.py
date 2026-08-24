@@ -134,12 +134,13 @@ with tab_exam:
         elif not selected_types:
             st.warning("문제 유형을 1개 이상 선택해주세요.")
         else:
-            with st.spinner("AI가 SDH Premium 스타일의 시험지를 제작하고 있습니다..."):
+            with st.spinner("AI가 SDH Premium 스타일의 시험지와 해설지를 분리하여 제작하고 있습니다..."):
                 passages_text = ""
                 for q in selected_q_nums:
                     text = mock_db.get(q, f"[{q} 지문 업데이트가 필요합니다]")
                     passages_text += f"[{q}]\n{text}\n\n"
 
+                # 프롬프트 강화: 문제와 정답을 파이썬이 쉽게 쪼갤 수 있도록 [문제] 태그 강제
                 prompt = f'''당신은 고등학교 내신 영어 출제 전문가입니다. 제공된 지문으로 선택된 문제 유형의 변형 문제를 만드세요.
 
 [선택된 문제 유형]
@@ -150,16 +151,17 @@ with tab_exam:
 
 [출력 규칙 및 필수 사항]
 1. 마크다운이나 HTML 태그를 절대 쓰지 마세요.
-2. 각 문제 끝에 반드시 "---문제구분선---" 을 넣어주세요.
-3. 빈칸을 만들 때 밑줄은 반드시 `_____` (밑줄 5개)만 사용하세요. 절대 길게 쓰지 마세요.
-4. 선택지는 반드시 원문자(①, ②, ③, ④, ⑤)를 사용하세요.
+2. 각 문제는 반드시 "[문제]" 로 시작하고, 정답은 "[정답]" 으로 시작하세요.
+3. 각 문제가 끝날 때마다 반드시 "---문제구분선---" 을 넣어주세요.
+4. 빈칸을 만들 때 밑줄은 반드시 `_____` (밑줄 5개)만 사용하세요.
+5. 선택지는 반드시 원문자(①, ②, ③, ④, ⑤)를 사용하세요.
 
 출력 예시:
-Q1. 다음 글의 밑줄 친 부분 중, 어법상 틀린 것은?
+[문제] Q1. 다음 글의 밑줄 친 부분 중, 어법상 틀린 것은?
 (지문 내용)
 ① 선택지내용
 ② 선택지내용
-[정답] 1
+[정답] Q1. 1
 [해설] 해설내용
 ---문제구분선---
 '''
@@ -170,22 +172,37 @@ Q1. 다음 글의 밑줄 친 부분 중, 어법상 틀린 것은?
                     raw_text = response.text.replace('```html', '').replace('```', '')
                     problems = raw_text.split('---문제구분선---')
                     
+                    # 1. 문제지와 정답지 분리 조립
+                    questions_html = ""
+                    answers_html = "<div class='section-title'>📝 정답 및 해설</div><br/><br/>"
+                    
+                    for prob in problems:
+                        if prob.strip():
+                            clean_text = prob.strip().replace('<', '&lt;').replace('>', '&gt;')
+                            
+                            # [정답] 이라는 글자를 기준으로 앞(문제)과 뒤(해설)를 싹둑 자름
+                            if '[정답]' in clean_text:
+                                parts = clean_text.split('[정답]')
+                                q_part = parts[0].replace('[문제]', '').strip()
+                                a_part = '[정답]' + parts[1].strip()
+                            else:
+                                q_part = clean_text.replace('[문제]', '').strip()
+                                a_part = "정답/해설 생성 실패"
+                                
+                            # 엔터를 HTML 줄바꿈으로 변경
+                            q_part = q_part.replace('\n', '<br/>')
+                            a_part = a_part.replace('\n', '<br/>').replace('[정답]', '<b>[정답]</b>').replace('[해설]', '<br/><b>[해설]</b>')
+                            
+                            # 상자(div)에 가두지 않고 순수 텍스트로 흘려보냄 (글씨 위로 튀는 현상 완벽 방지)
+                            questions_html += f'{q_part}<br/><br/><br/>'
+                            answers_html += f'{a_part}<br/><br/><br/>'
+
                     st.subheader("📝 생성된 시험지 미리보기")
                     st.write(raw_text.replace('---문제구분선---', '\n\n---\n\n'))
                     
-                    with st.spinner("2단 모의고사 포맷으로 정밀 인쇄 중입니다..."):
+                    with st.spinner("시험지와 해설지를 각각 분리하여 정밀 인쇄 중입니다..."):
                         
-                        # 가장 단순하고 안전한 HTML 변환 로직 (리스트 에러 원천 차단)
-                        formatted_problems_html = ""
-                        for prob in problems:
-                            if prob.strip():
-                                clean_text = prob.strip().replace('<', '&lt;').replace('>', '&gt;')
-                                clean_text = clean_text.replace('\n', '<br>')
-                                clean_text = clean_text.replace('[정답]', '<br><br><b>[정답]</b>')
-                                clean_text = clean_text.replace('[해설]', '<br><b>[해설]</b>')
-                                formatted_problems_html += f'<div class="question">{clean_text}</div>'
-                        
-                        # 버그를 유발하는 CSS를 완전히 덜어낸 순정 2단 프레임
+                        # 2. PDF 조립 ( <pdf:nextpage /> 를 사용해 페이지 강제 분리 )
                         html_content = f'''
                         <!DOCTYPE html>
                         <html>
@@ -202,19 +219,28 @@ Q1. 다음 글의 밑줄 친 부분 중, 어법상 틀린 것은?
                                 @page {{
                                     size: A4 portrait; margin: 0;
                                     @frame header_frame {{ -pdf-frame-content: header_content; left: 40pt; width: 515pt; top: 30pt; height: 30pt; }}
-                                    @frame col1_frame {{ left: 40pt; width: 245pt; top: 75pt; height: 715pt; }}
-                                    @frame col2_frame {{ left: 310pt; width: 245pt; top: 75pt; height: 715pt; }}
+                                    @frame col1_frame {{ left: 40pt; width: 245pt; top: 80pt; height: 710pt; }}
+                                    @frame col2_frame {{ left: 310pt; width: 245pt; top: 80pt; height: 710pt; }}
                                     @frame footer_frame {{ -pdf-frame-content: footer_content; left: 40pt; width: 515pt; top: 800pt; height: 20pt; }}
                                 }}
                                 .title {{ text-align: center; font-size: 14pt; font-weight: bold; border-bottom: 1.5px solid black; padding-bottom: 8px; }}
+                                .section-title {{ text-align: center; font-size: 13pt; font-weight: bold; background-color: #f0f0f0; padding: 5px; }}
                                 .footer-text {{ text-align: center; font-size: 9pt; color: gray; }}
-                                .question {{ margin-bottom: 25px; text-align: justify; }}
                             </style>
                         </head>
                         <body>
+                            <!-- 헤더 & 푸터 (모든 페이지 공통) -->
                             <div id="header_content"><div class="title">에스디에이치어학원 모의고사 변형문제</div></div>
                             <div id="footer_content"><div class="footer-text">SDH Premium Decoding & Internal Exam System</div></div>
-                            {formatted_problems_html}
+                            
+                            <!-- 1. 문제지 출력 부분 -->
+                            {questions_html}
+                            
+                            <!-- 2. 여기서 종이를 싹둑 자르고 다음 페이지로 넘어감 -->
+                            <pdf:nextpage />
+                            
+                            <!-- 3. 해설지 출력 부분 -->
+                            {answers_html}
                         </body>
                         </html>
                         '''
@@ -224,8 +250,8 @@ Q1. 다음 글의 밑줄 친 부분 중, 어법상 틀린 것은?
                         if pisa_status.err:
                             st.error("PDF 생성 중 오류가 발생했습니다.")
                         else:
-                            st.success("✅ 학원 전용 시험지 생성이 완료되었습니다!")
-                            st.download_button("📥 완성된 PDF 다운로드", data=pdf_file.getvalue(), file_name="SDH_모의고사_변형문제.pdf", mime="application/pdf")
+                            st.success("✅ 학원 전용 시험지 & 해설지 분리 생성이 완료되었습니다!")
+                            st.download_button("📥 완성된 PDF 다운로드", data=pdf_file.getvalue(), file_name="SDH_변형문제_해설지포함.pdf", mime="application/pdf")
                 except Exception as e:
                     st.error(f"오류가 발생했습니다: {e}")
 
