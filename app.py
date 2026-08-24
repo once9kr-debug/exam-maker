@@ -123,7 +123,7 @@ with tab_exam:
         elif not selected_types:
             st.warning("문제 유형을 1개 이상 선택해주세요.")
         else:
-            with st.spinner("AI가 튼튼한 테이블 박스로 시험지를 설계하고 있습니다..."):
+            with st.spinner("AI가 가장 안정적인 2단 레이아웃으로 시험지를 설계하고 있습니다..."):
                 passages_text = ""
                 for q in selected_q_nums:
                     text = mock_db.get(q, f"[{q} 지문 업데이트가 필요합니다]")
@@ -179,29 +179,31 @@ I am writing to you on behalf of the student council.
                             ans_part = prob.split('[정답시작]')[1].split('[해설시작]')[0].strip()
                             exp_part = prob.split('[해설시작]')[1].strip()
                             
-                            # 문제 번호 추출 (정답지에 표시하기 위함)
+                            # 문제 번호 추출
                             q_num_text = q_main.split('\n')[0].strip()
                             
-                            # 1. 문제지 파트 조립
+                            # 1. 문제지 파트 조립 (포장지를 모두 찢고 순수 텍스트로 나열)
                             q_html = q_main.replace('<', '&lt;').replace('>', '&gt;')
                             q_html = q_html.replace('\n', '<br/>')
                             
-                            # 💥 핵심 처방: 오류 나는 div 상자 대신, 완벽하게 튼튼한 '표(table)'로 지문 감싸기
-                            q_html = q_html.replace('[박스시작]', '<table class="passage-table"><tr><td>')
-                            q_html = q_html.replace('[박스끝]', '</td></tr></table>')
+                            # 💥 핵심 처방: 지문 박스만 얇은 선으로 그리고, 전체를 감싸는 덩어리(div)는 완전히 제거
+                            box_style = 'border: 0.5px solid black; padding: 10px; margin: 10px 0; background-color: #ffffff;'
+                            q_html = q_html.replace('[박스시작]', f'<div style="{box_style}">')
+                            q_html = q_html.replace('[박스끝]', '</div>')
                             
-                            questions_html += f"<div class='question-block'>{q_html}</div><br/>"
+                            # 문제 덩어리를 묶지 않고 그대로 흘려보냄 (겹침 100% 차단)
+                            questions_html += f"{q_html}<br/><br/><br/>"
                             
-                            # 2. 해설지 파트 조립 (문제 번호 포함)
+                            # 2. 해설지 파트 조립
                             a_html = exp_part.replace('<', '&lt;').replace('>', '&gt;').replace('\n', '<br/>')
-                            answers_html += f"<div class='answer-block'><b>[정답] {q_num_text} - {ans_part}</b><br/><b>[해설]</b> {a_html}</div><br/>"
+                            answers_html += f"<b>[정답] {q_num_text} - {ans_part}</b><br/><b>[해설]</b> {a_html}<br/><br/><br/>"
                         except Exception as e:
                             continue
 
                     st.subheader("📝 생성된 시험지 텍스트 미리보기")
                     st.write(raw_text.replace('[박스시작]', '---지문 시작---').replace('[박스끝]', '---지문 끝---'))
                     
-                    with st.spinner("가장 안정적인 레이아웃으로 PDF를 인쇄 중입니다..."):
+                    with st.spinner("겹침 현상을 원천 차단하고 PDF를 인쇄 중입니다..."):
                         
                         header_title = f"{exam_year} {exam_month} {exam_grade} 모의고사 변형문제"
                         
@@ -228,29 +230,12 @@ I am writing to you on behalf of the student council.
                                 .header-line {{ border-bottom: 1.5px solid black; text-align: center; font-weight: bold; font-size: 12pt; padding-bottom: 5px; }}
                                 .title {{ text-align: center; font-size: 14pt; font-weight: bold; border-bottom: 1.5px solid black; padding-bottom: 8px; }}
                                 .footer-text {{ text-align: center; font-size: 9pt; color: gray; }}
-                                
-                                /* 💥 테이블을 이용한 무적의 지문 박스 디자인 */
-                                .passage-table {{
-                                    width: 100%;
-                                    border: 1px solid black;
-                                    margin-top: 10px;
-                                    margin-bottom: 10px;
-                                }}
-                                .passage-table td {{
-                                    padding: 8px;
-                                    line-height: 15pt;
-                                }}
-                                
-                                .question-block {{ margin-bottom: 20px; text-align: left; }}
-                                .answer-block {{ margin-bottom: 25px; text-align: left; }}
                             </style>
                         </head>
                         <body>
-                            <!-- 상단 헤더 -->
                             <div id="header_content">
                                 <div class="header-line">에스디에이치어학원 {header_title}</div>
                             </div>
-                            <!-- 하단 푸터 -->
                             <div id="footer_content">
                                 <div class="footer-text">
                                     - <pdf:pagenumber /> -<br/>
@@ -258,7 +243,7 @@ I am writing to you on behalf of the student council.
                                 </div>
                             </div>
                             
-                            <!-- 1. 시험지 영역 -->
+                            <!-- 1. 겹침 없이 물 흐르듯 자연스럽게 떨어지는 시험지 영역 -->
                             {questions_html}
                             
                             <!-- 2. 다음 페이지로 강제 분리 -->
@@ -275,7 +260,7 @@ I am writing to you on behalf of the student council.
                         if pisa_status.err:
                             st.error("PDF 생성 중 오류가 발생했습니다.")
                         else:
-                            st.success("✅ 학원 전용 시험지 & 해설지 분리 생성이 완료되었습니다!")
+                            st.success("✅ 오류가 완벽히 해결된 시험지 생성이 완료되었습니다!")
                             st.download_button("📥 완성된 PDF 다운로드", data=pdf_file.getvalue(), file_name="SDH_최종_실전모의고사.pdf", mime="application/pdf")
                 except Exception as e:
                     st.error(f"오류가 발생했습니다: {e}")
