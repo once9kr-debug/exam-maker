@@ -151,7 +151,7 @@ with tab_exam:
 [출력 규칙 및 필수 사항]
 1. 마크다운이나 HTML 태그를 절대 쓰지 마세요.
 2. 각 문제 끝에 반드시 "---문제구분선---" 을 넣어주세요.
-3. 빈칸을 만들 때 밑줄은 반드시 `_____` (밑줄 5개)만 사용하세요.
+3. 빈칸을 만들 때 밑줄은 반드시 `_____` (밑줄 5개)만 사용하세요. 절대 길게 쓰지 마세요.
 4. 선택지는 반드시 원문자(①, ②, ③, ④, ⑤)를 사용하세요.
 
 출력 예시:
@@ -175,18 +175,17 @@ Q1. 다음 글의 밑줄 친 부분 중, 어법상 틀린 것은?
                     
                     with st.spinner("2단 모의고사 포맷으로 정밀 인쇄 중입니다..."):
                         
-                        # 💥 핵심 처방: 엔진이 소화 불량에 걸리지 않도록 가장 단순하고 안전한 구조로 변경
+                        # 가장 단순하고 안전한 HTML 변환 로직 (리스트 에러 원천 차단)
                         formatted_problems_html = ""
                         for prob in problems:
                             if prob.strip():
                                 clean_text = prob.strip().replace('<', '&lt;').replace('>', '&gt;')
-                                # 모든 줄바꿈을 안전한 <br/> 태그로 일괄 변경
-                                clean_text = clean_text.replace('\n', '<br/>')
-                                clean_text = clean_text.replace('[정답]', '<br/><br/><b>[정답]</b>')
-                                clean_text = clean_text.replace('[해설]', '<br/><b>[해설]</b>')
-                                
-                                formatted_problems_html += f'<div class="question">{clean_text}</div><br/>'
+                                clean_text = clean_text.replace('\n', '<br>')
+                                clean_text = clean_text.replace('[정답]', '<br><br><b>[정답]</b>')
+                                clean_text = clean_text.replace('[해설]', '<br><b>[해설]</b>')
+                                formatted_problems_html += f'<div class="question">{clean_text}</div>'
                         
+                        # 버그를 유발하는 CSS를 완전히 덜어낸 순정 2단 프레임
                         html_content = f'''
                         <!DOCTYPE html>
                         <html>
@@ -197,10 +196,8 @@ Q1. 다음 글의 밑줄 친 부분 중, 어법상 틀린 것은?
                                 body {{ 
                                     font-family: 'NanumGothic'; 
                                     font-size: 10pt; 
-                                    line-height: 1.5; 
+                                    line-height: 1.6; 
                                     color: #000000; 
-                                    word-wrap: break-word; 
-                                    -pdf-word-wrap: CJK;
                                 }}
                                 @page {{
                                     size: A4 portrait; margin: 0;
