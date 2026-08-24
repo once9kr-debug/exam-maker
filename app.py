@@ -39,7 +39,7 @@ st.markdown("---")
 tab_workbook, tab_exam = st.tabs(["📚 워크북 제작", "🎯 내신 변형문제 제작"])
 
 # ==========================================
-# 탭 1: 워크북 제작 화면 (1단계 UI 유지)
+# 탭 1: 워크북 제작 화면
 # ==========================================
 with tab_workbook:
     st.subheader("📖 모의고사 워크북 검색 및 다운로드")
@@ -84,7 +84,7 @@ with tab_workbook:
             st.info("선택하신 워크북 파일이 다운로드 되었습니다!")
 
 # ==========================================
-# 탭 2: 내신 변형문제 출제 화면 (로직 완벽 이식)
+# 탭 2: 내신 변형문제 출제 화면
 # ==========================================
 with tab_exam:
     st.subheader("🎯 1. 출제 범위 선택 (모의고사)")
@@ -174,14 +174,23 @@ Q1. 다음 글의 밑줄 친 부분 중, 어법상 틀린 것은?
                     st.write(raw_text.replace('---문제구분선---', '\n\n---\n\n'))
                     
                     with st.spinner("2단 모의고사 포맷으로 정밀 인쇄 중입니다..."):
+                        
+                        # 핵심 처방: 글자들을 안전한 문단(p) 블록으로 포장하여 높이 계산 오류 방지
                         formatted_problems_html = ""
                         for prob in problems:
                             if prob.strip():
                                 clean_text = prob.strip().replace('<', '&lt;').replace('>', '&gt;')
-                                clean_text = clean_text.replace('\n', '<br>')
-                                clean_text = clean_text.replace('[정답]', '<br><br><b>[정답]</b>')
-                                clean_text = clean_text.replace('[해설]', '<br><b>[해설]</b>')
-                                formatted_problems_html += f'<div class="question">{clean_text}</div>'
+                                
+                                prob_html = ""
+                                for line in clean_text.split('\n'):
+                                    if line.strip():
+                                        line = line.replace('[정답]', '<br><br><b>[정답]</b>')
+                                        line = line.replace('[해설]', '<br><b>[해설]</b>')
+                                        prob_html += f"<p>{line}</p>"
+                                    else:
+                                        prob_html += "<br>"
+                                        
+                                formatted_problems_html += f'<div class="question">{prob_html}</div>'
                         
                         html_content = f'''
                         <!DOCTYPE html>
@@ -190,7 +199,14 @@ Q1. 다음 글의 밑줄 친 부분 중, 어법상 틀린 것은?
                             <meta charset="utf-8">
                             <style>
                                 @font-face {{ font-family: 'NanumGothic'; src: url('{font_path}'); }}
-                                body {{ font-family: 'NanumGothic'; font-size: 10pt; line-height: 1.5; color: #000000; }}
+                                body {{ 
+                                    font-family: 'NanumGothic'; 
+                                    font-size: 10pt; 
+                                    line-height: 1.5; 
+                                    color: #000000; 
+                                    /* 핵심 처방전 2: 아시아권 언어 줄바꿈 강제 */
+                                    -pdf-word-wrap: CJK; 
+                                }}
                                 @page {{
                                     size: A4 portrait; margin: 0;
                                     @frame header_frame {{ -pdf-frame-content: header_content; left: 40pt; width: 515pt; top: 30pt; height: 30pt; }}
@@ -200,7 +216,8 @@ Q1. 다음 글의 밑줄 친 부분 중, 어법상 틀린 것은?
                                 }}
                                 .title {{ text-align: center; font-size: 14pt; font-weight: bold; border-bottom: 1.5px solid black; padding-bottom: 8px; }}
                                 .footer-text {{ text-align: center; font-size: 9pt; color: gray; }}
-                                .question {{ margin-bottom: 25px; text-align: left; word-wrap: break-word; }}
+                                .question {{ margin-bottom: 25px; text-align: justify; }}
+                                p {{ margin: 0 0 4px 0; padding: 0; }} /* 문단 간격 최소화 */
                             </style>
                         </head>
                         <body>
