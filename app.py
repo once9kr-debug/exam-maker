@@ -106,7 +106,7 @@ with tab_exam:
         if not selected_q_nums or not selected_types:
             st.warning("지문 번호와 문제 유형을 각각 1개 이상 선택해주세요.")
         else:
-            with st.spinner("AI가 시험지와 정답지를 완벽한 형태로 조립하고 있습니다..."):
+            with st.spinner("AI가 가장 자연스러운 레이아웃으로 시험지를 조립하고 있습니다..."):
                 passages_text = ""
                 for q in selected_q_nums:
                     text = mock_db.get(q, f"[{q} 지문 업데이트가 필요합니다]")
@@ -118,7 +118,7 @@ with tab_exam:
 
 [출력 규칙 - 매우 엄격함]
 1. 각 문제는 반드시 [문제시작]과 [문제끝]으로 감싸세요.
-2. 지문 내용(삽입 문장 포함)은 반드시 [박스시작]과 [박스끝] 사이에 넣으세요. 문장 삽입 문제처럼 박스가 2개 필요하면 2번 사용하세요.
+2. 지문 내용(삽입 문장 포함)은 반드시 [박스시작]과 [박스끝] 사이에 넣으세요.
 3. 객관식 선택지는 예외 없이 무조건 '①, ②, ③, ④, ⑤' 기호로 시작하세요.
 4. 밑줄 친 부분은 반드시 <u>단어</u> 형태의 HTML 태그를 사용하세요. 빈칸은 밑줄 5개(_____)로 표시하세요.
 5. [정답시작] 아래에는 오직 '정답 번호(숫자)' 또는 '서술형 정답'만 간결하게 적으세요.
@@ -161,24 +161,35 @@ I am <u>pleased</u> to invite you.
                             first_line = q_main.split('\n')[0].strip()
                             q_num = first_line.split('.')[0] if '.' in first_line else "★"
                             
-                            # 💥 천재적인 중복 선택지 제거 로직: 
-                            # '마지막 박스끝'을 기준으로 그 안쪽에 ①, ② 기호가 들어있다면, 그 이후에 나오는 하단 선택지를 통째로 날려버립니다.
+                            # 중복 선택지 제거 로직
                             last_box_end_idx = q_main.rfind('[박스끝]')
                             if last_box_end_idx != -1:
                                 text_before_options = q_main[:last_box_end_idx]
                                 if '①' in text_before_options and '②' in text_before_options:
                                     q_main = q_main[:last_box_end_idx + len('[박스끝]')]
                             
-                            # 💥 강력한 태그 보호 로직: 전체 텍스트에 대해 <u> 태그를 무조건 살려냅니다! (헤더 포함)
+                            # 태그 보호 로직
                             q_main_escaped = q_main.replace('<', '&lt;').replace('>', '&gt;')
                             q_main_escaped = q_main_escaped.replace('&lt;u&gt;', '<u>').replace('&lt;/u&gt;', '</u>')
                             q_main_escaped = q_main_escaped.replace('&lt;U&gt;', '<u>').replace('&lt;/U&gt;', '</u>')
                             
-                            # 💥 다중 박스 완벽 지원: 박스가 몇 개든 [박스시작]을 만나면 모두 예쁜 테두리로 바꿉니다.
-                            q_html = q_main_escaped.replace('\n', '<br/>')
-                            q_html = q_html.replace('[박스시작]<br/>', '[박스시작]').replace('<br/>[박스끝]', '[박스끝]')
-                            q_html = q_html.replace('[박스시작]', '<div class="passage-box">')
-                            q_html = q_html.replace('[박스끝]', '</div>')
+                            # 옵션 분리 및 HTML 조립
+                            if '[박스끝]' in q_main_escaped:
+                                pre_box = q_main_escaped.split('[박스시작]')[0].strip()
+                                box_content = q_main_escaped.split('[박스시작]')[1].split('[박스끝]')[0].strip()
+                                options_content = q_main_escaped.split('[박스끝]')[1].strip()
+                                
+                                pre_box_html = pre_box.replace('\n', '<br/>')
+                                box_content_html = box_content.replace('\n', '<br/>')
+                                options_content_html = options_content.replace('\n', '<br/>')
+                                
+                                q_html = f"{pre_box_html}"
+                                q_html += f'<div class="passage-box">{box_content_html}</div>'
+                                if options_content_html:
+                                    # 💥 수정 포인트: 선택지 전용 클래스 적용 (왼쪽 정렬을 위함)
+                                    q_html += f'<div class="options-text">{options_content_html}</div>'
+                            else:
+                                q_html = q_main_escaped.replace('\n', '<br/>')
                             
                             valid_q_htmls.append(f"<div class='question-block'>{q_html}</div>")
                             
@@ -187,19 +198,9 @@ I am <u>pleased</u> to invite you.
                         except Exception as e:
                             continue
 
-                    questions_final_html = ""
-                    for i in range(0, len(valid_q_htmls), 4):
-                        chunk = valid_q_htmls[i:i+4]
-                        questions_final_html += '<div class="two-column-layout">' + "".join(chunk) + '</div>'
-                        if i + 4 < len(valid_q_htmls):
-                            questions_final_html += '<div style="page-break-after: always;"></div>'
-
-                    answers_final_html = ""
-                    for i in range(0, len(valid_a_htmls), 4):
-                        chunk = valid_a_htmls[i:i+4]
-                        answers_final_html += '<div class="two-column-layout">' + "".join(chunk) + '</div>'
-                        if i + 4 < len(valid_a_htmls):
-                            answers_final_html += '<div style="page-break-after: always;"></div>'
+                    # 💥 수정 포인트: 억지로 4개씩 끊지 않고 통으로 묶어서 브라우저 자연 흐름에 맡김
+                    questions_final_html = '<div class="two-column-layout">' + "".join(valid_q_htmls) + '</div>'
+                    answers_final_html = '<div class="two-column-layout">' + "".join(valid_a_htmls) + '</div>'
 
                     header_title = f"{exam_year} {exam_month} {exam_grade} 모의고사 변형문제"
                     
@@ -238,7 +239,7 @@ I am <u>pleased</u> to invite you.
                             .question-block {{ 
                                 break-inside: avoid; 
                                 page-break-inside: avoid; 
-                                margin-bottom: 20px; /* 여백을 더 쫀쫀하게 축소 */
+                                margin-bottom: 55px; /* 💥 수정 포인트: 문제 간격 대폭 확대 */
                                 text-align: justify; 
                                 word-break: keep-all; 
                             }}
@@ -250,6 +251,12 @@ I am <u>pleased</u> to invite you.
                                 background-color: #fff;
                                 text-align: justify;
                                 word-break: break-all;
+                            }}
+                            
+                            .options-text {{
+                                margin-top: 5px;
+                                text-align: left; /* 💥 수정 포인트: 선택지는 왼쪽 정렬 고정 (자간 벌어짐 방지) */
+                                word-break: keep-all;
                             }}
                             
                             .answers-section {{ 
@@ -268,7 +275,7 @@ I am <u>pleased</u> to invite you.
                             .answer-block {{ 
                                 break-inside: avoid; 
                                 page-break-inside: avoid;
-                                margin-bottom: 25px; 
+                                margin-bottom: 35px; 
                                 text-align: justify; 
                                 word-break: keep-all; 
                             }}
@@ -285,18 +292,20 @@ I am <u>pleased</u> to invite you.
                             <div class="header-sub">SDH Premium Decoding & Internal Exam System</div>
                         </div>
                         
+                        <!-- 💥 물 흐르듯 자연스럽게 2단으로 넘어가는 시험지 -->
                         {questions_final_html}
                         
                         <div class="answers-section">
                             <div class="section-title">정답 및 해설</div>
+                            <!-- 해설지도 자연스러운 2단 흐름 유지 -->
                             {answers_final_html}
                         </div>
                     </body>
                     </html>
                     '''
                     
-                    st.success("✅ 박스 다중 인식 및 밑줄 보호 로직이 완벽하게 적용되었습니다!")
-                    st.download_button("📥 인쇄용 웹 문서(HTML) 다운로드", data=html_content, file_name="SDH_실전모의고사_완벽본.html", mime="text/html")
+                    st.success("✅ 간격 조정 및 자연스러운 페이지 배치 로직이 완벽하게 적용되었습니다!")
+                    st.download_button("📥 인쇄용 웹 문서(HTML) 다운로드", data=html_content, file_name="SDH_실전모의고사_레이아웃최적화.html", mime="text/html")
                 except Exception as e:
                     st.error(f"오류가 발생했습니다: {e}")
 
