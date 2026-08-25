@@ -80,4 +80,5 @@ with tab_exam:
 # 하단 푸터
 # ==========================================
 st.markdown("---")
-st.markdown("<div style='text-align: center; color: gray; font-size: 12px;'>SDH Premium Decoding & Internal Exam System</div>", unsafe_allow_html=True)
+# 💥 수정 포인트: 1학기 교재명 삭제 및 시스템 이름으로 깔끔하게 변경
+st.markdown("<div style='text-align: center; color: gray; font-size: 12px;'>SDH ACADEMY Internal Exam System</div>", unsafe_allow_html=True)
