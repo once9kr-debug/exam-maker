@@ -106,7 +106,7 @@ with tab_exam:
         if not selected_q_nums or not selected_types:
             st.warning("지문 번호와 문제 유형을 각각 1개 이상 선택해주세요.")
         else:
-            with st.spinner("AI가 가장 자연스러운 레이아웃으로 시험지를 조립하고 있습니다..."):
+            with st.spinner("AI가 유연한 여백 최적화 레이아웃으로 시험지를 조립하고 있습니다..."):
                 passages_text = ""
                 for q in selected_q_nums:
                     text = mock_db.get(q, f"[{q} 지문 업데이트가 필요합니다]")
@@ -118,8 +118,8 @@ with tab_exam:
 
 [출력 규칙 - 매우 엄격함]
 1. 각 문제는 반드시 [문제시작]과 [문제끝]으로 감싸세요.
-2. 지문 내용(삽입 문장 포함)은 반드시 [박스시작]과 [박스끝] 사이에 넣으세요.
-3. 객관식 선택지는 예외 없이 무조건 '①, ②, ③, ④, ⑤' 기호로 시작하세요.
+2. 지문 내용(삽입 문장 등)은 반드시 [박스시작]과 [박스끝] 사이에 넣으세요. 문장 삽입 문제처럼 박스가 2개 필요하면 2번 사용하세요.
+3. 객관식 선택지는 무조건 '①, ②, ③, ④, ⑤' 기호로 시작하세요.
 4. 밑줄 친 부분은 반드시 <u>단어</u> 형태의 HTML 태그를 사용하세요. 빈칸은 밑줄 5개(_____)로 표시하세요.
 5. [정답시작] 아래에는 오직 '정답 번호(숫자)' 또는 '서술형 정답'만 간결하게 적으세요.
 
@@ -132,13 +132,10 @@ I am <u>pleased</u> to invite you.
 [박스끝]
 ① pleased
 ② collecting
-③ donating
-④ condition
-⑤ while
 [정답시작]
-4
+1
 [해설시작]
-여기에 해설을 작성하세요.
+해설 작성.
 [문제끝]
 '''
                 try:
@@ -161,33 +158,33 @@ I am <u>pleased</u> to invite you.
                             first_line = q_main.split('\n')[0].strip()
                             q_num = first_line.split('.')[0] if '.' in first_line else "★"
                             
-                            # 중복 선택지 제거 로직
-                            last_box_end_idx = q_main.rfind('[박스끝]')
-                            if last_box_end_idx != -1:
-                                text_before_options = q_main[:last_box_end_idx]
-                                if '①' in text_before_options and '②' in text_before_options:
-                                    q_main = q_main[:last_box_end_idx + len('[박스끝]')]
-                            
-                            # 태그 보호 로직
+                            # 특수문자 및 태그 전역 보호 처리 (헤더, 본문, 선택지 모두 적용)
                             q_main_escaped = q_main.replace('<', '&lt;').replace('>', '&gt;')
                             q_main_escaped = q_main_escaped.replace('&lt;u&gt;', '<u>').replace('&lt;/u&gt;', '</u>')
                             q_main_escaped = q_main_escaped.replace('&lt;U&gt;', '<u>').replace('&lt;/U&gt;', '</u>')
                             
-                            # 옵션 분리 및 HTML 조립
-                            if '[박스끝]' in q_main_escaped:
-                                pre_box = q_main_escaped.split('[박스시작]')[0].strip()
-                                box_content = q_main_escaped.split('[박스시작]')[1].split('[박스끝]')[0].strip()
-                                options_content = q_main_escaped.split('[박스끝]')[1].strip()
+                            # 마지막 [박스끝]을 기준으로 지문 영역과 선택지 영역 분리
+                            last_end = q_main_escaped.rfind('[박스끝]')
+                            
+                            if last_end != -1:
+                                main_part = q_main_escaped[:last_end + len('[박스끝]')]
+                                options_part = q_main_escaped[last_end + len('[박스끝]'):].strip()
                                 
-                                pre_box_html = pre_box.replace('\n', '<br/>')
-                                box_content_html = box_content.replace('\n', '<br/>')
-                                options_content_html = options_content.replace('\n', '<br/>')
+                                # 💥 천재적 중복 선택지 제거 로직: 지문 영역에 ①, ②가 있으면 선택지 영역 삭제
+                                if '①' in main_part and '②' in main_part:
+                                    options_part = ""
                                 
-                                q_html = f"{pre_box_html}"
-                                q_html += f'<div class="passage-box">{box_content_html}</div>'
-                                if options_content_html:
-                                    # 💥 수정 포인트: 선택지 전용 클래스 적용 (왼쪽 정렬을 위함)
-                                    q_html += f'<div class="options-text">{options_content_html}</div>'
+                                # 💥 다중 박스 무한 적용 로직: 박스가 몇 개든 전부 div로 치환
+                                main_part = main_part.replace('\n', '<br/>')
+                                main_part = main_part.replace('[박스시작]<br/>', '[박스시작]').replace('<br/>[박스끝]', '[박스끝]')
+                                main_part = main_part.replace('[박스시작]', '<div class="passage-box">')
+                                main_part = main_part.replace('[박스끝]', '</div>')
+                                
+                                options_html = options_part.replace('\n', '<br/>')
+                                
+                                q_html = main_part
+                                if options_html:
+                                    q_html += f'<div class="options-text">{options_html}</div>'
                             else:
                                 q_html = q_main_escaped.replace('\n', '<br/>')
                             
@@ -198,11 +195,11 @@ I am <u>pleased</u> to invite you.
                         except Exception as e:
                             continue
 
-                    # 💥 수정 포인트: 억지로 4개씩 끊지 않고 통으로 묶어서 브라우저 자연 흐름에 맡김
-                    questions_final_html = '<div class="two-column-layout">' + "".join(valid_q_htmls) + '</div>'
-                    answers_final_html = '<div class="two-column-layout">' + "".join(valid_a_htmls) + '</div>'
-
                     header_title = f"{exam_year} {exam_month} {exam_grade} 모의고사 변형문제"
+                    
+                    # 💥 수정 포인트: Flexbox 레이아웃 적용 (빈 공간 없이 좌->우, 위->아래로 꽉 채움)
+                    questions_final_html = '<div class="flex-container">' + "".join(valid_q_htmls) + '</div>'
+                    answers_final_html = '<div class="flex-container">' + "".join(valid_a_htmls) + '</div>'
                     
                     html_content = f'''
                     <!DOCTYPE html>
@@ -231,15 +228,18 @@ I am <u>pleased</u> to invite you.
                             .header-title {{ font-size: 16pt; font-weight: bold; margin-bottom: 5px; }}
                             .header-sub {{ font-size: 10pt; color: #555; }}
                             
-                            .two-column-layout {{
-                                column-count: 2;
-                                column-gap: 30px;
+                            /* 💥 핵심 처방: 공간 낭비를 없애는 Flexbox 레이아웃 (왼쪽->오른쪽 자연스러운 배치) */
+                            .flex-container {{
+                                display: flex;
+                                flex-wrap: wrap;
+                                justify-content: space-between;
                             }}
                             
                             .question-block {{ 
+                                width: 48%; /* 한 줄에 2개씩 배치 */
                                 break-inside: avoid; 
                                 page-break-inside: avoid; 
-                                margin-bottom: 55px; /* 💥 수정 포인트: 문제 간격 대폭 확대 */
+                                margin-bottom: 45px; 
                                 text-align: justify; 
                                 word-break: keep-all; 
                             }}
@@ -255,7 +255,7 @@ I am <u>pleased</u> to invite you.
                             
                             .options-text {{
                                 margin-top: 5px;
-                                text-align: left; /* 💥 수정 포인트: 선택지는 왼쪽 정렬 고정 (자간 벌어짐 방지) */
+                                text-align: left; 
                                 word-break: keep-all;
                             }}
                             
@@ -273,6 +273,7 @@ I am <u>pleased</u> to invite you.
                                 margin-bottom: 25px; 
                             }}
                             .answer-block {{ 
+                                width: 48%; /* 해설지도 한 줄에 2개씩 자연스럽게 배치 */
                                 break-inside: avoid; 
                                 page-break-inside: avoid;
                                 margin-bottom: 35px; 
@@ -292,20 +293,20 @@ I am <u>pleased</u> to invite you.
                             <div class="header-sub">SDH Premium Decoding & Internal Exam System</div>
                         </div>
                         
-                        <!-- 💥 물 흐르듯 자연스럽게 2단으로 넘어가는 시험지 -->
+                        <!-- 💥 유연하게 빈 공간을 채우는 시험지 -->
                         {questions_final_html}
                         
                         <div class="answers-section">
                             <div class="section-title">정답 및 해설</div>
-                            <!-- 해설지도 자연스러운 2단 흐름 유지 -->
+                            <!-- 💥 유연하게 빈 공간을 채우는 해설지 -->
                             {answers_final_html}
                         </div>
                     </body>
                     </html>
                     '''
                     
-                    st.success("✅ 간격 조정 및 자연스러운 페이지 배치 로직이 완벽하게 적용되었습니다!")
-                    st.download_button("📥 인쇄용 웹 문서(HTML) 다운로드", data=html_content, file_name="SDH_실전모의고사_레이아웃최적화.html", mime="text/html")
+                    st.success("✅ 박스 다중 인식 및 유연한 공간 배치 로직이 완벽히 적용되었습니다!")
+                    st.download_button("📥 인쇄용 웹 문서(HTML) 다운로드", data=html_content, file_name="SDH_실전모의고사_완벽본.html", mime="text/html")
                 except Exception as e:
                     st.error(f"오류가 발생했습니다: {e}")
 
