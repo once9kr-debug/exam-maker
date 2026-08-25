@@ -4,9 +4,35 @@ import google.generativeai as genai
 import json
 
 # ==========================================
-# 페이지 기본 설정
+# 페이지 기본 설정 (Wide 모드)
 # ==========================================
 st.set_page_config(page_title="SDH ACADEMY 통합 출제 플랫폼", layout="wide")
+
+# ==========================================
+# 커스텀 CSS (UI 그룹화 및 시각적 개선)
+# ==========================================
+st.markdown("""
+<style>
+    .group-header {
+        font-weight: 700;
+        font-size: 1.1rem;
+        color: #2C3E50;
+        border-bottom: 2px solid #3498DB;
+        padding-bottom: 8px;
+        margin-top: 20px;
+        margin-bottom: 15px;
+    }
+    .sub-group-title {
+        font-weight: bold;
+        color: #555;
+        margin-top: 15px;
+        margin-bottom: 5px;
+    }
+    div[data-testid="stCheckbox"] label span {
+        font-size: 0.95rem;
+    }
+</style>
+""", unsafe_allow_html=True)
 
 # ==========================================
 # API 세팅
@@ -31,66 +57,125 @@ mock_db = {
 st.title("SDH ACADEMY 통합 출제 플랫폼 🛠️")
 st.markdown("---")
 
-tab_workbook, tab_exam = st.tabs(["📚 워크북 제작", "🎯 변형문제 제작"])
+# ==========================================
+# 메인 탭 구성
+# ==========================================
+tab_search, tab_exam = st.tabs(["🔍 모의고사 검색 및 워크북", "🎯 세부 변형문제 제작"])
 
-with tab_workbook:
-    st.subheader("📖 모의고사 워크북 제작")
-    st.info("워크북 제작 기능은 준비 중입니다.")
-
-with tab_exam:
-    st.subheader("🎯 1. 출제 범위 선택 (모의고사)")
+# ------------------------------------------
+# 탭 1: 모의고사 검색 (첫 번째 이미지 UI 벤치마킹)
+# ------------------------------------------
+with tab_search:
+    st.markdown("<div class='group-header'>📚 모의고사 DB 검색</div>", unsafe_allow_html=True)
     
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        exam_grade = st.selectbox("대상 학년", ["고1", "고2", "고3"])
-    with col2:
-        exam_year = st.selectbox("모의고사 연도", ["2026년", "2025년", "2024년"])
-    with col3:
-        exam_month = st.selectbox("시행 월", ["3월", "6월", "9월", "11월"])
+    col1, col2, col3, col4 = st.columns([1.5, 1.5, 1.5, 1])
+    with col1: st.selectbox("교재 선택", ["고등 모의고사", "고등 교과서", "중등 교과서"])
+    with col2: st.selectbox("연도", ["2026년", "2025년", "2024년"])
+    with col3: st.selectbox("시행 월", ["3월", "6월", "9월", "11월"])
+    with col4: 
+        st.write("")
+        st.button("🔍 검색", use_container_width=True)
+        
+    st.markdown("---")
+    
+    # 세련된 데이터 테이블 렌더링
+    st.caption("조회된 모의고사 목록")
+    db_data = {
+        "연도": ["2026", "2026", "2026", "2025", "2025"],
+        "월": ["6월", "6월", "6월", "11월", "11월"],
+        "주관": ["2026년 6월", "2026년 6월", "2026년 6월", "2025년 11월", "2025년 11월"],
+        "학년": ["1학년", "2학년", "3학년", "1학년", "2학년"],
+        "지문수": [28, 28, 28, 28, 28]
+    }
+    st.dataframe(pd.DataFrame(db_data), use_container_width=True, hide_index=True)
+
+# ------------------------------------------
+# 탭 2: 세부 변형문제 제작 (두 번째 이미지 UI 벤치마킹)
+# ------------------------------------------
+with tab_exam:
+    st.markdown("##### 📝 출제 대상: **2026년 6월, 1학년, 고1 모의고사**")
+    
+    # 💥 카테고리별 문제 유형 그룹화 UI
+    st.markdown("<div class='group-header'>📌 1. 출제할 세부 유형 선택</div>", unsafe_allow_html=True)
+    
+    type_all = st.checkbox("✅ 전체 유형 선택", key="type_all")
+    
+    cat1, cat2, cat3, cat4 = st.columns(4)
+    with cat1:
+        st.markdown("<div class='sub-group-title'>🟢 대의 파악</div>", unsafe_allow_html=True)
+        t_topic = st.checkbox("주제 추론", value=type_all)
+        t_title = st.checkbox("제목 추론", value=type_all)
+        t_purpose = st.checkbox("목적/요지", value=type_all)
+    with cat2:
+        st.markdown("<div class='sub-group-title'>🟠 언어 논리</div>", unsafe_allow_html=True)
+        t_blank = st.checkbox("빈칸 추론", value=type_all)
+        t_order = st.checkbox("글의 순서", value=type_all)
+        t_insert = st.checkbox("문장 삽입", value=type_all)
+        t_imply = st.checkbox("함축 의미", value=type_all)
+    with cat3:
+        st.markdown("<div class='sub-group-title'>🔴 어법/어휘</div>", unsafe_allow_html=True)
+        t_grammar = st.checkbox("어법 추론", value=type_all)
+        t_vocab = st.checkbox("어휘 추론", value=type_all)
+    with cat4:
+        st.markdown("<div class='sub-group-title'>🔵 서술형/기타</div>", unsafe_allow_html=True)
+        t_essay = st.checkbox("서술형 영작", value=type_all)
+        t_match = st.checkbox("내용 일치/불일치", value=type_all)
+
+    st.markdown("---")
+
+    # 💥 논리적 단락별 지문 선택 UI
+    st.markdown("<div class='group-header'>📖 2. 모의고사 지문(번호) 선택</div>", unsafe_allow_html=True)
+    
+    q_all = st.checkbox("✅ 전체 지문 선택", key="q_all")
+    
+    # 1그룹 (18~22번)
+    st.caption("■ 1그룹 (18~22번: 목적, 심경, 주장, 요지 등)")
+    g1_cols = st.columns(8)
+    for i, q in enumerate(range(18, 23)):
+        with g1_cols[i]: st.checkbox(f"{q}번", value=q_all, key=f"q_{q}")
         
     st.write("")
-    st.checkbox("✅ 전체 지문 선택", key="select_all_q")
     
-    q_cols = st.columns(10)
-    for i, q_num in enumerate(range(18, 46)):
-        with q_cols[i % 10]:
-            st.checkbox(f"{q_num}번", key=f"q_{q_num}")
-
-    st.markdown("---")
-    st.subheader("🎯 2. 문제 유형 선택")
-    st.checkbox("✅ 전체 유형 선택", key="select_all_types")
+    # 2그룹 (23~34번)
+    st.caption("■ 2그룹 (23~34번: 주제, 제목, 도표, 내용일치, 어법, 빈칸 등)")
+    g2_cols = st.columns(8)
+    for i, q in enumerate(range(23, 35)):
+        with g2_cols[i%8]: st.checkbox(f"{q}번", value=q_all, key=f"q_{q}")
+            
+    st.write("")
     
-    t_col1, t_col2, t_col3, t_col4 = st.columns(4)
-    with t_col1:
-        st.checkbox("어법 추론", key="type_1")
-        st.checkbox("어휘 추론", key="type_2")
-    with t_col2:
-        st.checkbox("빈칸 추론", key="type_3")
-        st.checkbox("함축 의미", key="type_4")
-    with t_col3:
-        st.checkbox("글의 순서", key="type_5")
-        st.checkbox("문장 삽입", key="type_6")
-    with t_col4:
-        st.checkbox("서술형 영작", key="type_7")
-        st.checkbox("주제/제목", key="type_8")
+    # 3그룹 (35~45번)
+    st.caption("■ 3그룹 (35~45번: 흐름, 순서, 삽입, 요약, 장문 등)")
+    g3_cols = st.columns(8)
+    for i, q in enumerate(range(35, 46)):
+        with g3_cols[i%8]: st.checkbox(f"{q}번", value=q_all, key=f"q_{q}")
 
     st.markdown("---")
     
     # ------------------------------------------
-    # 💥 JSON 데이터 기반 파이썬 자체 렌더링 로직
+    # 실행 버튼 및 렌더링 로직 (기존 100% 유지)
     # ------------------------------------------
-    if st.button("🚀 고급 인쇄용 변형문제 생성 (JSON 아키텍처)", type="primary", use_container_width=True):
-        
+    if st.button("🚀 SDH Premium 변형문제 생성 및 인쇄", type="primary", use_container_width=True):
         selected_q_nums = [f"{num}번" for num in range(18, 46) if st.session_state.get(f"q_{num}")]
         
-        # 하드코딩된 테스트 유형 (향후 세션 스테이트 연동)
-        final_selected_types = ["어법 추론", "빈칸 추론", "주제/제목", "문장 삽입"]
+        # 선택된 유형 수집 로직 추가
+        selected_types_list = []
+        if t_topic: selected_types_list.append("주제 추론")
+        if t_title: selected_types_list.append("제목 추론")
+        if t_purpose: selected_types_list.append("목적/요지")
+        if t_blank: selected_types_list.append("빈칸 추론")
+        if t_order: selected_types_list.append("글의 순서")
+        if t_insert: selected_types_list.append("문장 삽입")
+        if t_grammar: selected_types_list.append("어법 추론")
+        if t_vocab: selected_types_list.append("어휘 추론")
+        if t_essay: selected_types_list.append("서술형 영작")
+        
+        final_selected_types = selected_types_list if selected_types_list else ["어법 추론"] # 기본값
         
         if not selected_q_nums:
             st.warning("지문 번호를 1개 이상 선택해주세요.")
         else:
-            with st.spinner("데이터 분리 엔진 가동 중... AI가 구조화된 데이터를 추출하고 있습니다. (약 15초)"):
-                
+            with st.spinner("최고급 명조체 템플릿에 맞추어 문제를 출제하고 있습니다. (약 15~30초)"):
                 passages_text = ""
                 for idx, q in enumerate(selected_q_nums):
                     text = mock_db.get(q, f"[{q} 지문 업데이트가 필요합니다]")
@@ -117,48 +202,33 @@ with tab_exam:
     "options": ["① The importance of time", "② How to relax", "③ Why we sleep", "④ Fast-paced modern life", "⑤ Value of health"],
     "answer": "1",
     "explanation": "시간의 중요성에 대해 반복적으로 강조하고 있는 글입니다."
-  }},
-  {{
-    "question": "2. 다음 글의 밑줄 친 부분 중, 어법상 틀린 것은?",
-    "passage": "Dear Mr. Jones,<br/>I am writing to you... ① <u>to be</u>...",
-    "options": [],
-    "answer": "5",
-    "explanation": "look forward to의 to는 전치사이므로 동명사 hearing이 와야 합니다."
   }}
 ]
 '''
                 try:
-                    # 1. AI API 호출
                     model = genai.GenerativeModel('gemini-3.6-flash')
                     response = model.generate_content(prompt)
                     
-                    # 2. JSON 파싱
                     raw_text = response.text.strip()
-                    if raw_text.startswith("```json"):
-                        raw_text = raw_text[7:]
-                    if raw_text.startswith("```"):
-                        raw_text = raw_text[3:]
-                    if raw_text.endswith("```"):
-                        raw_text = raw_text[:-3]
+                    if raw_text.startswith("```json"): raw_text = raw_text[7:]
+                    if raw_text.startswith("```"): raw_text = raw_text[3:]
+                    if raw_text.endswith("```"): raw_text = raw_text[:-3]
                         
                     problems_data = json.loads(raw_text.strip())
                     
-                    # 3. 파이썬 기반 렌더링
                     questions_html = ""
                     answers_html = ""
                     
                     for idx, data in enumerate(problems_data):
                         q_title = data.get("question", f"{idx+1}. 문제가 누락되었습니다.")
-                        
                         passage_raw = data.get("passage", "")
+                        
                         if "[박스]" in passage_raw and "[/박스]" in passage_raw:
                             inserted_box = passage_raw.split("[박스]")[1].split("[/박스]")[0]
                             main_passage = passage_raw.split("[/박스]")[1].strip()
-                            # 💥 박스 여백(padding)을 줄여서 타이트하게 수정
                             passage_html = f'<div class="passage-box" style="margin-bottom: 5px;">{inserted_box}</div>'
                             passage_html += f'<div class="passage-box">{main_passage}</div>'
                         else:
-                            # 💥 박스 여백(padding)을 줄여서 타이트하게 수정
                             passage_html = f'<div class="passage-box">{passage_raw}</div>'
                         
                         options_html = ""
@@ -181,7 +251,6 @@ with tab_exam:
                         </div>
                         '''
                         
-                        # 💥 정답 아래에 줄바꿈(<br/>)을 추가하여 해설이 다음 줄로 내려가도록 수정
                         answers_html += f'''
                         <div class="answer-block">
                             <b>{q_num_only}번 - {answer}</b><br/>
@@ -189,7 +258,6 @@ with tab_exam:
                         </div>
                         '''
 
-                    # 4. 최종 HTML/CSS 병합
                     header_title = f"{exam_year} {exam_month} {exam_grade} 모의고사 변형문제"
                     
                     html_content = f'''
@@ -211,7 +279,6 @@ with tab_exam:
                                 margin: 0 auto;
                                 padding: 20px;
                             }}
-                            
                             .header-container {{ 
                                 font-family: 'Noto Sans KR', sans-serif; 
                                 display: flex;
@@ -229,7 +296,6 @@ with tab_exam:
                                 column-gap: 35px;
                                 column-fill: auto;
                             }}
-                            
                             .question-block {{ 
                                 break-inside: avoid; 
                                 page-break-inside: avoid; 
@@ -237,14 +303,11 @@ with tab_exam:
                                 text-align: justify; 
                                 word-break: keep-all; 
                             }}
-                            
                             .question-title {{
                                 font-family: 'Noto Sans KR', sans-serif;
                                 font-weight: bold;
                                 margin-bottom: 6px;
                             }}
-                            
-                            /* 💥 박스 내부 위아래 빈 공간(padding)을 5px로 줄여 타이트하게 밀착 */
                             .passage-box {{ 
                                 border: 1.1px solid #000; 
                                 padding: 5px 10px; 
@@ -254,11 +317,7 @@ with tab_exam:
                                 word-break: keep-all; 
                                 overflow-wrap: break-word; 
                             }}
-                            
-                            /* 💥 억지로 두 줄로 접히는 것을 방지하는 inline-block 적용 */
-                            .options-container {{
-                                margin-top: 6px;
-                            }}
+                            .options-container {{ margin-top: 6px; }}
                             .option-item {{
                                 display: inline-block;
                                 margin-right: 18px; 
@@ -266,13 +325,11 @@ with tab_exam:
                                 text-align: left; 
                                 word-break: keep-all;
                             }}
-                            
                             .answers-section {{ 
                                 break-before: page; 
                                 page-break-before: always; 
                                 margin-top: 50px; 
                             }}
-                            
                             .section-title {{ 
                                 font-family: 'Noto Sans KR', sans-serif;
                                 font-size: 14pt; 
@@ -282,7 +339,6 @@ with tab_exam:
                                 padding-bottom: 10px; 
                                 margin-bottom: 25px; 
                             }}
-                            
                             .answer-block {{ 
                                 break-inside: avoid; 
                                 page-break-inside: avoid;
@@ -290,7 +346,6 @@ with tab_exam:
                                 text-align: justify; 
                                 word-break: keep-all; 
                             }}
-                            
                             @media print {{
                                 @page {{ margin: 15mm; }}
                                 body {{ padding: 0; }}
@@ -302,11 +357,9 @@ with tab_exam:
                             <div class="header-title">{header_title}</div>
                             <div class="header-sub">SDH ACADEMY Internal Exam System</div>
                         </div>
-                        
                         <div class="two-column-layout">
                             {questions_html}
                         </div>
-                        
                         <div class="answers-section">
                             <div class="section-title">정답 및 해설</div>
                             <div class="two-column-layout">
@@ -316,11 +369,10 @@ with tab_exam:
                     </body>
                     </html>
                     '''
-                    
-                    st.success("✅ 디테일 최적화 완료! 완벽한 시험지가 조립되었습니다.")
-                    st.download_button("📥 상용 서비스급 고급 시험지 다운로드", data=html_content, file_name="SDH_Premium_Exam.html", mime="text/html")
+                    st.success("✅ 완벽한 명조체 템플릿과 고도화된 UI가 적용되었습니다!")
+                    st.download_button("📥 상용 서비스급 시험지 다운로드", data=html_content, file_name="SDH_Premium_Exam.html", mime="text/html")
                 except json.JSONDecodeError as e:
-                    st.error("AI가 구조화된 데이터(JSON)를 완벽하게 생성하지 못했습니다. 다시 시도해주세요.")
+                    st.error("AI가 구조화된 데이터를 생성하지 못했습니다. 다시 시도해주세요.")
                 except Exception as e:
                     st.error(f"오류가 발생했습니다: {e}")
 
