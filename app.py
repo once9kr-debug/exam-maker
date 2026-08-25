@@ -63,22 +63,23 @@ st.markdown("---")
 tab_search, tab_exam = st.tabs(["🔍 모의고사 검색 및 워크북", "🎯 세부 변형문제 제작"])
 
 # ------------------------------------------
-# 탭 1: 모의고사 검색 (첫 번째 이미지 UI 벤치마킹)
+# 탭 1: 모의고사 검색
 # ------------------------------------------
 with tab_search:
     st.markdown("<div class='group-header'>📚 모의고사 DB 검색</div>", unsafe_allow_html=True)
     
-    col1, col2, col3, col4 = st.columns([1.5, 1.5, 1.5, 1])
-    with col1: st.selectbox("교재 선택", ["고등 모의고사", "고등 교과서", "중등 교과서"])
-    with col2: st.selectbox("연도", ["2026년", "2025년", "2024년"])
-    with col3: st.selectbox("시행 월", ["3월", "6월", "9월", "11월"])
-    with col4: 
+    # 💥 수정 포인트: 선택한 값들을 변수(exam_year 등)로 저장하여 에러 방지
+    col1, col2, col3, col4, col5 = st.columns([1.5, 1, 1, 1, 1])
+    with col1: exam_type = st.selectbox("교재 선택", ["고등 모의고사", "고등 교과서"])
+    with col2: exam_year = st.selectbox("연도", ["2026년", "2025년", "2024년"])
+    with col3: exam_month = st.selectbox("시행 월", ["3월", "6월", "9월", "11월"])
+    with col4: exam_grade = st.selectbox("학년", ["고1", "고2", "고3"])
+    with col5: 
         st.write("")
         st.button("🔍 검색", use_container_width=True)
         
     st.markdown("---")
     
-    # 세련된 데이터 테이블 렌더링
     st.caption("조회된 모의고사 목록")
     db_data = {
         "연도": ["2026", "2026", "2026", "2025", "2025"],
@@ -90,12 +91,12 @@ with tab_search:
     st.dataframe(pd.DataFrame(db_data), use_container_width=True, hide_index=True)
 
 # ------------------------------------------
-# 탭 2: 세부 변형문제 제작 (두 번째 이미지 UI 벤치마킹)
+# 탭 2: 세부 변형문제 제작
 # ------------------------------------------
 with tab_exam:
-    st.markdown("##### 📝 출제 대상: **2026년 6월, 1학년, 고1 모의고사**")
+    # 💥 수정 포인트: 첫 번째 탭에서 선택한 값이 여기에 자동으로 반영되도록 연결
+    st.markdown(f"##### 📝 출제 대상: **{exam_year} {exam_month}, {exam_grade} 모의고사**")
     
-    # 💥 카테고리별 문제 유형 그룹화 UI
     st.markdown("<div class='group-header'>📌 1. 출제할 세부 유형 선택</div>", unsafe_allow_html=True)
     
     type_all = st.checkbox("✅ 전체 유형 선택", key="type_all")
@@ -123,12 +124,10 @@ with tab_exam:
 
     st.markdown("---")
 
-    # 💥 논리적 단락별 지문 선택 UI
     st.markdown("<div class='group-header'>📖 2. 모의고사 지문(번호) 선택</div>", unsafe_allow_html=True)
     
     q_all = st.checkbox("✅ 전체 지문 선택", key="q_all")
     
-    # 1그룹 (18~22번)
     st.caption("■ 1그룹 (18~22번: 목적, 심경, 주장, 요지 등)")
     g1_cols = st.columns(8)
     for i, q in enumerate(range(18, 23)):
@@ -136,7 +135,6 @@ with tab_exam:
         
     st.write("")
     
-    # 2그룹 (23~34번)
     st.caption("■ 2그룹 (23~34번: 주제, 제목, 도표, 내용일치, 어법, 빈칸 등)")
     g2_cols = st.columns(8)
     for i, q in enumerate(range(23, 35)):
@@ -144,7 +142,6 @@ with tab_exam:
             
     st.write("")
     
-    # 3그룹 (35~45번)
     st.caption("■ 3그룹 (35~45번: 흐름, 순서, 삽입, 요약, 장문 등)")
     g3_cols = st.columns(8)
     for i, q in enumerate(range(35, 46)):
@@ -152,13 +149,9 @@ with tab_exam:
 
     st.markdown("---")
     
-    # ------------------------------------------
-    # 실행 버튼 및 렌더링 로직 (기존 100% 유지)
-    # ------------------------------------------
     if st.button("🚀 SDH Premium 변형문제 생성 및 인쇄", type="primary", use_container_width=True):
         selected_q_nums = [f"{num}번" for num in range(18, 46) if st.session_state.get(f"q_{num}")]
         
-        # 선택된 유형 수집 로직 추가
         selected_types_list = []
         if t_topic: selected_types_list.append("주제 추론")
         if t_title: selected_types_list.append("제목 추론")
@@ -166,11 +159,13 @@ with tab_exam:
         if t_blank: selected_types_list.append("빈칸 추론")
         if t_order: selected_types_list.append("글의 순서")
         if t_insert: selected_types_list.append("문장 삽입")
+        if t_imply: selected_types_list.append("함축 의미")
         if t_grammar: selected_types_list.append("어법 추론")
         if t_vocab: selected_types_list.append("어휘 추론")
         if t_essay: selected_types_list.append("서술형 영작")
+        if t_match: selected_types_list.append("내용 일치/불일치")
         
-        final_selected_types = selected_types_list if selected_types_list else ["어법 추론"] # 기본값
+        final_selected_types = selected_types_list if selected_types_list else ["어법 추론"]
         
         if not selected_q_nums:
             st.warning("지문 번호를 1개 이상 선택해주세요.")
@@ -369,7 +364,7 @@ with tab_exam:
                     </body>
                     </html>
                     '''
-                    st.success("✅ 완벽한 명조체 템플릿과 고도화된 UI가 적용되었습니다!")
+                    st.success("✅ 오류 수정 완료! 변수들이 정상적으로 연결되었습니다.")
                     st.download_button("📥 상용 서비스급 시험지 다운로드", data=html_content, file_name="SDH_Premium_Exam.html", mime="text/html")
                 except json.JSONDecodeError as e:
                     st.error("AI가 구조화된 데이터를 생성하지 못했습니다. 다시 시도해주세요.")
