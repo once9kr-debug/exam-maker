@@ -58,12 +58,11 @@ with tab_exam:
     st.markdown("---")
     
     # ------------------------------------------
-    # 실행 버튼 (수능 포맷 레이아웃 테스트 로직)
+    # 실행 버튼 (레이아웃 테스트 로직)
     # ------------------------------------------
     if st.button("🚀 출력 레이아웃 테스트 (임시 데이터로 문서 생성)", type="primary", use_container_width=True):
-        with st.spinner("수능 포맷에 맞춘 완벽한 2단 문서를 조립하고 있습니다..."):
+        with st.spinner("왼쪽 단을 채우고 오른쪽 단으로 넘어가는 오리지널 모의고사 레이아웃으로 조립 중입니다..."):
             
-            # 💥 수정 포인트: 가짜 데이터(Dummy)도 완벽한 수능 양식(지문 내 번호 포함)으로 변경
             dummy_response = '''
 [문제시작]
 1. 다음 글의 밑줄 친 부분 중, 어법상 틀린 것은?
@@ -106,9 +105,24 @@ In today's fast-paced world, it is important to take time for yourself. Constant
 [해설시작]
 자기 관리를 위한 시간을 갖는 것은 건강하고 지속 가능한 삶을 유지하는 데 필수적이라는 내용입니다.
 [문제끝]
+
+[문제시작]
+4. 다음 글의 요지로 가장 적절한 것은? (흐름 테스트용)
+[박스시작]
+The concept of 'social proof' dictates how we make decisions in groups, especially under conditions of uncertainty. When people are unsure about what path to take, they naturally look at the actions of others to guide their own behavior. This tendency can be seen everywhere, from choosing a busy restaurant over an empty one to adopting popular social trends. While following the crowd can often save time and reduce errors, it also carries the risk of collective mistakes. When everyone relies on everyone else without critical thinking, people might end up walking off a cliff together. We assume that if many people are doing something, they must know what they are doing, but this assumption is not always correct.
+[박스끝]
+① 군중 심리에 의존하는 것은 올바른 판단을 방해할 수 있다.
+② 타인의 행동을 모방하는 것은 생존에 필수적이다.
+③ 현대 사회에서는 독창성보다 집단 소속감이 중시된다.
+④ 불확실한 상황에서는 전문가의 의견을 따르는 것이 안전하다.
+⑤ 사람들은 본능적으로 대다수의 의견을 거부하려는 경향이 있다.
+[정답시작]
+1
+[해설시작]
+다수의 행동을 따르는 '사회적 증거'가 항상 올바른 것은 아니며 집단적인 실수를 초래할 수 있다는 점을 지적하고 있습니다.
+[문제끝]
 '''
             
-            # 파이썬 파싱 로직 
             problems = dummy_response.strip().split('[문제끝]')
             valid_q_htmls = []
             valid_a_htmls = []
@@ -123,21 +137,17 @@ In today's fast-paced world, it is important to take time for yourself. Constant
                     first_line = q_main.split('\n')[0].strip()
                     q_num = first_line.split('.')[0] if '.' in first_line else "★"
                     
-                    # 태그 보호
                     q_main_escaped = q_main.replace('<', '&lt;').replace('>', '&gt;')
                     q_main_escaped = q_main_escaped.replace('&lt;u&gt;', '<u>').replace('&lt;/u&gt;', '</u>')
                     
-                    # 지문과 선택지 분리 (선택지가 없으면 빈 문자열로 처리됨)
                     last_end = q_main_escaped.rfind('[박스끝]')
                     if last_end != -1:
                         main_part = q_main_escaped[:last_end + len('[박스끝]')]
                         options_part = q_main_escaped[last_end + len('[박스끝]'):].strip()
                         
-                        # 지문 내 ①, ② 존재 시 선택지 완벽 제거 (수능 포맷 대응)
                         if '①' in main_part and '②' in main_part:
                             options_part = ""
                             
-                        # 박스 치환
                         main_part = main_part.replace('\n', '<br/>')
                         main_part = main_part.replace('[박스시작]<br/>', '[박스시작]').replace('<br/>[박스끝]', '[박스끝]')
                         main_part = main_part.replace('[박스시작]', '<div class="passage-box">')
@@ -158,9 +168,9 @@ In today's fast-paced world, it is important to take time for yourself. Constant
                 except Exception as e:
                     continue
 
-            # Flexbox 조립
-            questions_final_html = '<div class="flex-container">' + "".join(valid_q_htmls) + '</div>'
-            answers_final_html = '<div class="flex-container">' + "".join(valid_a_htmls) + '</div>'
+            # 💥 핵심 수정 포인트: Flexbox를 버리고, 오리지널 다단(Column) 레이아웃으로 변경
+            questions_final_html = '<div class="two-column-layout">' + "".join(valid_q_htmls) + '</div>'
+            answers_final_html = '<div class="two-column-layout">' + "".join(valid_a_htmls) + '</div>'
             
             header_title = f"{exam_year} {exam_month} {exam_grade} 모의고사 변형문제"
             
@@ -190,13 +200,14 @@ In today's fast-paced world, it is important to take time for yourself. Constant
                     .header-title {{ font-size: 16pt; font-weight: bold; margin-bottom: 5px; }}
                     .header-sub {{ font-size: 10pt; color: #555; }}
                     
-                    .flex-container {{
-                        display: flex;
-                        flex-wrap: wrap;
-                        justify-content: space-between;
+                    /* 💥 왼쪽부터 아래로 쭉 채우고 오른쪽 단으로 넘어가는 오리지널 단 분리 로직 적용 */
+                    .two-column-layout {{
+                        column-count: 2;
+                        column-gap: 30px;
+                        column-fill: auto; /* 왼쪽 단을 꽉 채운 후 오른쪽으로 넘어가도록 지시 */
                     }}
+                    
                     .question-block {{ 
-                        width: 48%; 
                         break-inside: avoid; 
                         page-break-inside: avoid; 
                         margin-bottom: 45px; 
@@ -204,14 +215,14 @@ In today's fast-paced world, it is important to take time for yourself. Constant
                         word-break: keep-all; 
                     }}
                     
-                    /* 💥 수정 포인트: 박스 상하 여백을 대폭 줄여서 다중 박스가 밀착되도록 처리 */
                     .passage-box {{ 
                         border: 1.2px solid #000; 
                         padding: 10px 12px; 
-                        margin: 3px 0; /* 여백 축소 */
+                        margin: 3px 0; 
                         background-color: #fff;
                         text-align: justify;
-                        word-break: break-all;
+                        word-break: keep-all; 
+                        overflow-wrap: break-word; 
                     }}
                     
                     .options-text {{
@@ -219,11 +230,13 @@ In today's fast-paced world, it is important to take time for yourself. Constant
                         text-align: left; 
                         word-break: keep-all;
                     }}
+                    
                     .answers-section {{ 
                         break-before: page; 
                         page-break-before: always; 
                         margin-top: 50px; 
                     }}
+                    
                     .section-title {{ 
                         font-size: 15pt; 
                         font-weight: bold; 
@@ -232,8 +245,8 @@ In today's fast-paced world, it is important to take time for yourself. Constant
                         padding-bottom: 10px; 
                         margin-bottom: 25px; 
                     }}
+                    
                     .answer-block {{ 
-                        width: 48%;
                         break-inside: avoid; 
                         page-break-inside: avoid;
                         margin-bottom: 35px; 
@@ -263,8 +276,8 @@ In today's fast-paced world, it is important to take time for yourself. Constant
             </html>
             '''
             
-            st.success("✅ 수능 포맷(지문 내 번호) 및 다중 박스 밀착 디자인이 완벽히 준비되었습니다!")
-            st.download_button("📥 인쇄용 레이아웃 테스트 문서 다운로드", data=html_content, file_name="SDH_Layout_Test_CSAT.html", mime="text/html")
+            st.success("✅ 실제 모의고사와 동일한 좌->우 수직 단 분할 레이아웃이 적용되었습니다!")
+            st.download_button("📥 인쇄용 레이아웃 테스트 문서 다운로드", data=html_content, file_name="SDH_Layout_Test_Column.html", mime="text/html")
 
 # ==========================================
 # 하단 푸터
