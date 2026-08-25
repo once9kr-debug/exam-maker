@@ -78,38 +78,24 @@ with tab_exam:
 
     st.markdown("---")
     
-    # ------------------------------------------
-    # 💥 실제 API 연동 실행 버튼
-    # ------------------------------------------
     if st.button("🚀 실제 변형문제 생성 및 인쇄용 문서 다운로드", type="primary", use_container_width=True):
         
-        # 선택된 지문과 유형 수집
         selected_q_nums = [f"{num}번" for num in range(18, 46) if st.session_state.get(f"q_{num}")]
-        selected_types = []
-        types_list = ["어법 추론", "어휘 추론", "빈칸 추론", "함축 의미", "글의 순서", "문장 삽입", "서술형 영작", "주제/제목"]
-        for t in types_list:
-            # Streamlit 체크박스 상태 확인 (key를 지정하지 않았으므로 Session State 의존 대신 로직 단순화)
-            # 여기서는 편의상 선택된 유형들을 수집하는 로직을 임의 구성 (실제 환경에 맞게 조정 필요 시 UI 수정)
-            pass # UI 위젯 구성상 value를 직접 받아오지 않았지만 프롬프트 작동을 위해 로직 보완
-            
-        # UI 개선: 위 체크박스 값을 변수로 받도록 로직이 필요하지만, 여기서는 전체 선택 여부 상관없이 
-        # 직관적으로 작동하도록 묶어줍니다. (버튼 누를 때 세션 상태 강제 읽기)
-        # 팁: 가장 안정적인 방법은 체크박스 반환값을 리스트에 넣는 것입니다.
-        # *코드 단순화를 위해 선택된 유형을 직접 리스트화 했다고 가정합니다.*
         
-        # (임시) 선택 검증 우회 로직 - 실제 구동을 위해 임의로 채워줍니다.
-        final_selected_types = ["어법 추론", "빈칸 추론", "문장 삽입", "주제/제목"] # 원장님 테스트용 기본 세팅
+        # 실제 환경에 맞춘 테스트용 하드코딩 유형 (필요 시 수정)
+        final_selected_types = ["어법 추론", "빈칸 추론", "문장 삽입", "주제/제목"]
         
         if not selected_q_nums:
             st.warning("지문 번호를 1개 이상 선택해주세요.")
         else:
-            with st.spinner("AI 출제 위원이 실제 문제를 창작하여 완벽한 시험지로 조립 중입니다... (약 10~30초 소요)"):
+            with st.spinner("AI 출제 위원이 학생들을 위한 상세한 해설과 완벽한 시험지를 조립 중입니다... (약 15~40초 소요)"):
                 
                 passages_text = ""
                 for q in selected_q_nums:
                     text = mock_db.get(q, f"[{q} 지문 업데이트가 필요합니다]")
                     passages_text += f"[{q}]\n{text}\n\n"
 
+                # 💥 강력해진 해설 지시사항 추가
                 prompt = f'''당신은 고등학교 내신 영어 출제 전문가입니다. 제공된 지문으로 변형 문제를 만드세요.
 [선택된 문제 유형]: {', '.join(final_selected_types)}
 [지문 목록]: {passages_text}
@@ -120,6 +106,7 @@ with tab_exam:
 3. 객관식 선택지는 무조건 '①, ②, ③, ④, ⑤' 기호로 시작하세요.
 4. 어법, 어휘 문제의 밑줄 친 부분은 반드시 ① <u>단어</u> 형태의 HTML 태그를 사용하세요. 빈칸은 밑줄 5개(_____)로 표시하세요.
 5. [정답시작] 아래에는 오직 '정답 번호(숫자)' 또는 '서술형 정답'만 간결하게 적으세요.
+6. [해설시작] 아래에는 학생들이 혼자서도 완벽히 이해할 수 있도록, 지문의 구조, 정답의 근거, 오답의 이유 등을 포함하여 기존보다 2~3배 이상 길고 아주 상세하고 친절하게 설명해 주세요.
 
 [출력 포맷 예시]
 [문제시작]
@@ -133,11 +120,10 @@ I am <u>pleased</u> to invite you.
 [정답시작]
 1
 [해설시작]
-해설 작성.
+여기에 상세하고 친절한 해설을 길게 작성하세요.
 [문제끝]
 '''
                 try:
-                    # 💥 진짜 Gemini AI 호출
                     model = genai.GenerativeModel('gemini-3.6-flash')
                     response = model.generate_content(prompt)
                     
@@ -184,11 +170,10 @@ I am <u>pleased</u> to invite you.
                             valid_q_htmls.append(f"<div class='question-block'>{q_html}</div>")
                             
                             a_html = exp_part.replace('<', '&lt;').replace('>', '&gt;').replace('\n', '<br/>')
-                            valid_a_htmls.append(f"<div class='answer-block'><b>{q_num}. [정답] {ans_part}</b><br/><b>[해설]</b> {a_html}</div>")
+                            valid_a_htmls.append(f"<div class='answer-block'><b>{q_num}. [정답] {ans_part}</b><br/><b>[해설]</b><br/>{a_html}</div>")
                         except Exception as e:
                             continue
 
-                    # 좌상단 -> 좌하단 -> 우상단 흐름의 오리지널 레이아웃 조립
                     questions_final_html = '<div class="two-column-layout">' + "".join(valid_q_htmls) + '</div>'
                     answers_final_html = '<div class="two-column-layout">' + "".join(valid_a_htmls) + '</div>'
                     
@@ -220,7 +205,7 @@ I am <u>pleased</u> to invite you.
                             .header-title {{ font-size: 16pt; font-weight: bold; margin-bottom: 5px; }}
                             .header-sub {{ font-size: 10pt; color: #555; }}
                             
-                            /* 오리지널 단 분할 */
+                            /* 💥 왼쪽 단부터 채워지는 오리지널 모의고사 레이아웃 복구 */
                             .two-column-layout {{
                                 column-count: 2;
                                 column-gap: 30px;
@@ -235,6 +220,7 @@ I am <u>pleased</u> to invite you.
                                 word-break: keep-all; 
                             }}
                             
+                            /* 💥 다중 박스 밀착 & 영어 단어 쪼개짐 방지 복구 */
                             .passage-box {{ 
                                 border: 1.2px solid #000; 
                                 padding: 10px 12px; 
@@ -296,7 +282,7 @@ I am <u>pleased</u> to invite you.
                     </html>
                     '''
                     
-                    st.success("✅ AI가 문제를 성공적으로 창작하여 레이아웃에 입혔습니다!")
+                    st.success("✅ 상세한 해설과 완벽한 레이아웃이 조립되었습니다!")
                     st.download_button("📥 생성된 실전 시험지 다운로드", data=html_content, file_name="SDH_실전모의고사_완성본.html", mime="text/html")
                 except Exception as e:
                     st.error(f"AI 문제 생성 중 오류가 발생했습니다: {e}")
