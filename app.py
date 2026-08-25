@@ -68,7 +68,6 @@ tab_search, tab_exam = st.tabs(["🔍 모의고사 검색 및 워크북", "🎯 
 with tab_search:
     st.markdown("<div class='group-header'>📚 모의고사 DB 검색</div>", unsafe_allow_html=True)
     
-    # 💥 수정 포인트: 선택한 값들을 변수(exam_year 등)로 저장하여 에러 방지
     col1, col2, col3, col4, col5 = st.columns([1.5, 1, 1, 1, 1])
     with col1: exam_type = st.selectbox("교재 선택", ["고등 모의고사", "고등 교과서"])
     with col2: exam_year = st.selectbox("연도", ["2026년", "2025년", "2024년"])
@@ -94,7 +93,6 @@ with tab_search:
 # 탭 2: 세부 변형문제 제작
 # ------------------------------------------
 with tab_exam:
-    # 💥 수정 포인트: 첫 번째 탭에서 선택한 값이 여기에 자동으로 반영되도록 연결
     st.markdown(f"##### 📝 출제 대상: **{exam_year} {exam_month}, {exam_grade} 모의고사**")
     
     st.markdown("<div class='group-header'>📌 1. 출제할 세부 유형 선택</div>", unsafe_allow_html=True)
@@ -124,28 +122,15 @@ with tab_exam:
 
     st.markdown("---")
 
+    # 💥 수정 포인트: 그룹 구분을 모두 삭제하고, 18~45번을 10열 간격으로 깔끔하게 통합 배치
     st.markdown("<div class='group-header'>📖 2. 모의고사 지문(번호) 선택</div>", unsafe_allow_html=True)
     
     q_all = st.checkbox("✅ 전체 지문 선택", key="q_all")
     
-    st.caption("■ 1그룹 (18~22번: 목적, 심경, 주장, 요지 등)")
-    g1_cols = st.columns(8)
-    for i, q in enumerate(range(18, 23)):
-        with g1_cols[i]: st.checkbox(f"{q}번", value=q_all, key=f"q_{q}")
-        
-    st.write("")
-    
-    st.caption("■ 2그룹 (23~34번: 주제, 제목, 도표, 내용일치, 어법, 빈칸 등)")
-    g2_cols = st.columns(8)
-    for i, q in enumerate(range(23, 35)):
-        with g2_cols[i%8]: st.checkbox(f"{q}번", value=q_all, key=f"q_{q}")
-            
-    st.write("")
-    
-    st.caption("■ 3그룹 (35~45번: 흐름, 순서, 삽입, 요약, 장문 등)")
-    g3_cols = st.columns(8)
-    for i, q in enumerate(range(35, 46)):
-        with g3_cols[i%8]: st.checkbox(f"{q}번", value=q_all, key=f"q_{q}")
+    q_cols = st.columns(10)
+    for i, q_num in enumerate(range(18, 46)):
+        with q_cols[i % 10]:
+            st.checkbox(f"{q_num}번", value=q_all, key=f"q_{q_num}")
 
     st.markdown("---")
     
@@ -350,7 +335,7 @@ with tab_exam:
                     <body>
                         <div class="header-container">
                             <div class="header-title">{header_title}</div>
-                            <div class="header-sub">SDH ACADEMY Internal Exam System</div>
+                            <div class="header-sub">SDH Premium Decoding & Internal Exam System</div>
                         </div>
                         <div class="two-column-layout">
                             {questions_html}
@@ -364,7 +349,7 @@ with tab_exam:
                     </body>
                     </html>
                     '''
-                    st.success("✅ 오류 수정 완료! 변수들이 정상적으로 연결되었습니다.")
+                    st.success("✅ 지문 번호 그룹이 해제되고 깔끔하게 통합되었습니다!")
                     st.download_button("📥 상용 서비스급 시험지 다운로드", data=html_content, file_name="SDH_Premium_Exam.html", mime="text/html")
                 except json.JSONDecodeError as e:
                     st.error("AI가 구조화된 데이터를 생성하지 못했습니다. 다시 시도해주세요.")
@@ -375,4 +360,4 @@ with tab_exam:
 # 하단 푸터
 # ==========================================
 st.markdown("---")
-st.markdown("<div style='text-align: center; color: gray; font-size: 12px;'>SDH ACADEMY Internal Exam System</div>", unsafe_allow_html=True)
+st.markdown("<div style='text-align: center; color: gray; font-size: 12px;'>SDH Premium Decoding & Internal Exam System</div>", unsafe_allow_html=True)
