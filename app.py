@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import google.generativeai as genai
+import json
 
 # ==========================================
 # 페이지 기본 설정
@@ -30,9 +31,6 @@ mock_db = {
 st.title("SDH ACADEMY 통합 출제 플랫폼 🛠️")
 st.markdown("---")
 
-# ==========================================
-# 메인 탭 구성
-# ==========================================
 tab_workbook, tab_exam = st.tabs(["📚 워크북 제작", "🎯 변형문제 제작"])
 
 with tab_workbook:
@@ -64,119 +62,134 @@ with tab_exam:
     
     t_col1, t_col2, t_col3, t_col4 = st.columns(4)
     with t_col1:
-        st.checkbox("어법 추론")
-        st.checkbox("어휘 추론")
+        st.checkbox("어법 추론", key="type_1")
+        st.checkbox("어휘 추론", key="type_2")
     with t_col2:
-        st.checkbox("빈칸 추론")
-        st.checkbox("함축 의미")
+        st.checkbox("빈칸 추론", key="type_3")
+        st.checkbox("함축 의미", key="type_4")
     with t_col3:
-        st.checkbox("글의 순서")
-        st.checkbox("문장 삽입")
+        st.checkbox("글의 순서", key="type_5")
+        st.checkbox("문장 삽입", key="type_6")
     with t_col4:
-        st.checkbox("서술형 영작")
-        st.checkbox("주제/제목")
+        st.checkbox("서술형 영작", key="type_7")
+        st.checkbox("주제/제목", key="type_8")
 
     st.markdown("---")
     
-    if st.button("🚀 실제 변형문제 생성 및 인쇄용 문서 다운로드", type="primary", use_container_width=True):
+    # ------------------------------------------
+    # 💥 JSON 데이터 기반 파이썬 자체 렌더링 로직
+    # ------------------------------------------
+    if st.button("🚀 고급 인쇄용 변형문제 생성 (JSON 아키텍처)", type="primary", use_container_width=True):
         
         selected_q_nums = [f"{num}번" for num in range(18, 46) if st.session_state.get(f"q_{num}")]
         
-        # 실제 환경에 맞춘 테스트용 하드코딩 유형 (필요 시 수정)
-        final_selected_types = ["어법 추론", "빈칸 추론", "문장 삽입", "주제/제목"]
+        # 하드코딩된 테스트 유형 (향후 세션 스테이트 연동)
+        final_selected_types = ["어법 추론", "빈칸 추론", "주제/제목", "문장 삽입"]
         
         if not selected_q_nums:
             st.warning("지문 번호를 1개 이상 선택해주세요.")
         else:
-            with st.spinner("AI 출제 위원이 학생들을 위한 상세한 해설과 완벽한 시험지를 조립 중입니다... (약 15~40초 소요)"):
+            with st.spinner("데이터 분리 엔진 가동 중... AI가 구조화된 데이터를 추출하고 있습니다. (약 15초)"):
                 
                 passages_text = ""
-                for q in selected_q_nums:
+                for idx, q in enumerate(selected_q_nums):
                     text = mock_db.get(q, f"[{q} 지문 업데이트가 필요합니다]")
-                    passages_text += f"[{q}]\n{text}\n\n"
+                    passages_text += f"[지문 {idx+1} - {q}]\n{text}\n\n"
 
-                # 💥 강력해진 해설 지시사항 추가
+                # 💥 AI에게 HTML 디자인을 금지하고 오직 순수 JSON 데이터만 요구하는 마스터 프롬프트
                 prompt = f'''당신은 고등학교 내신 영어 출제 전문가입니다. 제공된 지문으로 변형 문제를 만드세요.
 [선택된 문제 유형]: {', '.join(final_selected_types)}
 [지문 목록]: {passages_text}
 
 [출력 규칙 - 매우 엄격함]
-1. 각 문제는 반드시 [문제시작]과 [문제끝]으로 감싸세요.
-2. 지문 내용(삽입 문장 등)은 반드시 [박스시작]과 [박스끝] 사이에 넣으세요. 문장 삽입 문제처럼 박스가 2개 필요하면 2번 사용하세요.
-3. 객관식 선택지는 무조건 '①, ②, ③, ④, ⑤' 기호로 시작하세요.
-4. 어법, 어휘 문제의 밑줄 친 부분은 반드시 ① <u>단어</u> 형태의 HTML 태그를 사용하세요. 빈칸은 밑줄 5개(_____)로 표시하세요.
-5. [정답시작] 아래에는 오직 '정답 번호(숫자)' 또는 '서술형 정답'만 간결하게 적으세요.
-6. [해설시작] 아래에는 학생들이 혼자서도 완벽히 이해할 수 있도록, 지문의 구조, 정답의 근거, 오답의 이유 등을 포함하여 기존보다 2~3배 이상 길고 아주 상세하고 친절하게 설명해 주세요.
+1. 어떠한 부연 설명도 하지 말고, 오직 유효한 JSON 배열(Array) 형식만 출력하세요. 마크다운(```json)도 사용하지 마세요.
+2. JSON 배열의 각 객체는 다음 키를 가져야 합니다: "question", "passage", "options", "answer", "explanation"
+3. "question": 문제 발문 (예: "1. 다음 글의 밑줄 친 부분 중, 어법상 틀린 것은?")
+4. "passage": 지문 내용 원문. 문단 바꿈은 <br/>로 처리하세요. 어법/어휘 문제의 경우 지문 내에 ① <u>단어</u> 형태로 직접 번호와 밑줄을 넣으세요. 문장 삽입 문제의 경우 주어진 문장 박스도 포함해야 하니 [박스]주어진문장[/박스] 형태로 상단에 표기하세요.
+5. "options": 선택지 리스트. ["① apple", "② banana", ...]. 만약 어법/어휘/문장 삽입처럼 지문 안에 이미 번호가 있어서 하단 선택지가 필요 없다면 빈 리스트 [] 를 반환하세요.
+6. "answer": 정답 번호 (예: "5")
+7. "explanation": 정답의 근거와 오답의 이유를 상세히 적은 해설 텍스트.
 
-[출력 포맷 예시]
-[문제시작]
-1. 다음 글의 밑줄 친 부분 중, 어법상 틀린 것은?
-[박스시작]
-Dear Residents,
-I am <u>pleased</u> to invite you.
-[박스끝]
-① pleased
-② collecting
-[정답시작]
-1
-[해설시작]
-여기에 상세하고 친절한 해설을 길게 작성하세요.
-[문제끝]
+[출력 JSON 예시]
+[
+  {{
+    "question": "1. 다음 글의 제목으로 가장 적절한 것은?",
+    "passage": "In today's fast-paced world... (생략)",
+    "options": ["① The importance of time", "② How to relax", "③ Why we sleep", "④ Fast-paced modern life", "⑤ Value of health"],
+    "answer": "1",
+    "explanation": "시간의 중요성에 대해 반복적으로 강조하고 있는 글입니다."
+  }},
+  {{
+    "question": "2. 다음 글의 밑줄 친 부분 중, 어법상 틀린 것은?",
+    "passage": "Dear Mr. Jones,<br/>I am writing to you... ① <u>to be</u>...",
+    "options": [],
+    "answer": "5",
+    "explanation": "look forward to의 to는 전치사이므로 동명사 hearing이 와야 합니다."
+  }}
+]
 '''
                 try:
+                    # 1. AI API 호출
                     model = genai.GenerativeModel('gemini-3.6-flash')
                     response = model.generate_content(prompt)
                     
-                    raw_text = response.text.replace('```html', '').replace('```', '')
-                    problems = raw_text.split('[문제끝]')
+                    # 2. JSON 파싱 및 데이터 정제
+                    raw_text = response.text.strip()
+                    if raw_text.startswith("```json"):
+                        raw_text = raw_text[7:]
+                    if raw_text.startswith("```"):
+                        raw_text = raw_text[3:]
+                    if raw_text.endswith("```"):
+                        raw_text = raw_text[:-3]
+                        
+                    problems_data = json.loads(raw_text.strip())
                     
-                    valid_q_htmls = []
-                    valid_a_htmls = []
+                    # 3. 파이썬을 이용한 완벽한 렌더링 (디자인 통제)
+                    questions_html = ""
+                    answers_html = ""
                     
-                    for prob in problems:
-                        if '[문제시작]' not in prob: continue
-                        try:
-                            q_main = prob.split('[문제시작]')[1].split('[정답시작]')[0].strip()
-                            ans_part = prob.split('[정답시작]')[1].split('[해설시작]')[0].strip()
-                            exp_part = prob.split('[해설시작]')[1].strip()
+                    for idx, data in enumerate(problems_data):
+                        # 문제 제목
+                        q_title = data.get("question", f"{idx+1}. 문제가 누락되었습니다.")
+                        # 지문 렌더링 (삽입 문제용 이중 박스 처리 로직 포함)
+                        passage_raw = data.get("passage", "")
+                        if "[박스]" in passage_raw and "[/박스]" in passage_raw:
+                            inserted_box = passage_raw.split("[박스]")[1].split("[/박스]")[0]
+                            main_passage = passage_raw.split("[/박스]")[1].strip()
+                            passage_html = f'<div class="passage-box" style="margin-bottom: 8px;">{inserted_box}</div>'
+                            passage_html += f'<div class="passage-box">{main_passage}</div>'
+                        else:
+                            passage_html = f'<div class="passage-box">{passage_raw}</div>'
+                        
+                        # 지능형 선택지 렌더링 (길이에 따라 유동적으로 가로 배열)
+                        options_html = ""
+                        options = data.get("options", [])
+                        if options and len(options) > 0:
+                            options_html += '<div class="options-container">'
+                            for opt in options:
+                                options_html += f'<div class="option-item">{opt}</div>'
+                            options_html += '</div>'
                             
-                            first_line = q_main.split('\n')[0].strip()
-                            q_num = first_line.split('.')[0] if '.' in first_line else "★"
-                            
-                            q_main_escaped = q_main.replace('<', '&lt;').replace('>', '&gt;')
-                            q_main_escaped = q_main_escaped.replace('&lt;u&gt;', '<u>').replace('&lt;/u&gt;', '</u>')
-                            
-                            last_end = q_main_escaped.rfind('[박스끝]')
-                            if last_end != -1:
-                                main_part = q_main_escaped[:last_end + len('[박스끝]')]
-                                options_part = q_main_escaped[last_end + len('[박스끝]'):].strip()
-                                
-                                if '①' in main_part and '②' in main_part:
-                                    options_part = ""
-                                    
-                                main_part = main_part.replace('\n', '<br/>')
-                                main_part = main_part.replace('[박스시작]<br/>', '[박스시작]').replace('<br/>[박스끝]', '[박스끝]')
-                                main_part = main_part.replace('[박스시작]', '<div class="passage-box">')
-                                main_part = main_part.replace('[박스끝]', '</div>')
-                                
-                                options_html = options_part.replace('\n', '<br/>')
-                                
-                                q_html = main_part
-                                if options_html:
-                                    q_html += f'<div class="options-text">{options_html}</div>'
-                            else:
-                                q_html = q_main_escaped.replace('\n', '<br/>')
-                            
-                            valid_q_htmls.append(f"<div class='question-block'>{q_html}</div>")
-                            
-                            a_html = exp_part.replace('<', '&lt;').replace('>', '&gt;').replace('\n', '<br/>')
-                            valid_a_htmls.append(f"<div class='answer-block'><b>{q_num}. [정답] {ans_part}</b><br/><b>[해설]</b><br/>{a_html}</div>")
-                        except Exception as e:
-                            continue
+                        # 해설지 렌더링 (너른터 스타일의 한 문단 압축형)
+                        q_num_only = q_title.split('.')[0] if '.' in q_title else str(idx+1)
+                        answer = data.get("answer", "")
+                        explanation = data.get("explanation", "")
+                        
+                        questions_html += f'''
+                        <div class="question-block">
+                            <div class="question-title">{q_title}</div>
+                            {passage_html}
+                            {options_html}
+                        </div>
+                        '''
+                        
+                        answers_html += f'''
+                        <div class="answer-block">
+                            <b>{q_num_only}번 - {answer}</b> <b>[해설]</b> {explanation}
+                        </div>
+                        '''
 
-                    questions_final_html = '<div class="two-column-layout">' + "".join(valid_q_htmls) + '</div>'
-                    answers_final_html = '<div class="two-column-layout">' + "".join(valid_a_htmls) + '</div>'
-                    
+                    # 4. 최종 HTML/CSS 병합 (명조체/바탕체 적용)
                     header_title = f"{exam_year} {exam_month} {exam_grade} 모의고사 변형문제"
                     
                     html_content = f'''
@@ -186,9 +199,12 @@ I am <u>pleased</u> to invite you.
                         <meta charset="utf-8">
                         <title>{header_title}</title>
                         <style>
-                            @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;700&display=swap');
+                            /* 상용 모의고사 전용 명조체 적용 */
+                            @import url('https://fonts.googleapis.com/css2?family=Nanum+Myeongjo:wght@400;700&display=swap');
+                            @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@700&display=swap');
+                            
                             body {{ 
-                                font-family: 'Noto Sans KR', sans-serif; 
+                                font-family: 'Nanum Myeongjo', serif; /* 본문 명조체 */
                                 font-size: 10.5pt; 
                                 line-height: 1.5; 
                                 color: #000; 
@@ -196,19 +212,22 @@ I am <u>pleased</u> to invite you.
                                 margin: 0 auto;
                                 padding: 20px;
                             }}
+                            
                             .header-container {{ 
-                                text-align: center;
+                                font-family: 'Noto Sans KR', sans-serif; /* 제목만 고딕체 */
+                                display: flex;
+                                justify-content: space-between;
+                                align-items: flex-end;
                                 border-bottom: 2px solid #000; 
-                                padding-bottom: 15px; 
+                                padding-bottom: 10px; 
                                 margin-bottom: 25px; 
                             }}
-                            .header-title {{ font-size: 16pt; font-weight: bold; margin-bottom: 5px; }}
-                            .header-sub {{ font-size: 10pt; color: #555; }}
+                            .header-title {{ font-size: 15pt; font-weight: bold; }}
+                            .header-sub {{ font-size: 9pt; color: #555; }}
                             
-                            /* 💥 왼쪽 단부터 채워지는 오리지널 모의고사 레이아웃 복구 */
                             .two-column-layout {{
                                 column-count: 2;
-                                column-gap: 30px;
+                                column-gap: 35px;
                                 column-fill: auto;
                             }}
                             
@@ -220,9 +239,14 @@ I am <u>pleased</u> to invite you.
                                 word-break: keep-all; 
                             }}
                             
-                            /* 💥 다중 박스 밀착 & 영어 단어 쪼개짐 방지 복구 */
+                            .question-title {{
+                                font-family: 'Noto Sans KR', sans-serif;
+                                font-weight: bold;
+                                margin-bottom: 6px;
+                            }}
+                            
                             .passage-box {{ 
-                                border: 1.2px solid #000; 
+                                border: 1px solid #000; 
                                 padding: 10px 12px; 
                                 margin: 3px 0; 
                                 background-color: #fff;
@@ -231,8 +255,14 @@ I am <u>pleased</u> to invite you.
                                 overflow-wrap: break-word; 
                             }}
                             
-                            .options-text {{
+                            /* 지능적 선택지 가로 배열 로직 */
+                            .options-container {{
+                                display: flex;
+                                flex-wrap: wrap;
                                 margin-top: 5px;
+                            }}
+                            .option-item {{
+                                margin-right: 18px; /* 가로 여백 */
                                 text-align: left; 
                                 word-break: keep-all;
                             }}
@@ -244,7 +274,8 @@ I am <u>pleased</u> to invite you.
                             }}
                             
                             .section-title {{ 
-                                font-size: 15pt; 
+                                font-family: 'Noto Sans KR', sans-serif;
+                                font-size: 14pt; 
                                 font-weight: bold; 
                                 text-align: center; 
                                 border-bottom: 1px solid #000; 
@@ -252,10 +283,11 @@ I am <u>pleased</u> to invite you.
                                 margin-bottom: 25px; 
                             }}
                             
+                            /* 해설지 압축 포맷 */
                             .answer-block {{ 
                                 break-inside: avoid; 
                                 page-break-inside: avoid;
-                                margin-bottom: 35px; 
+                                margin-bottom: 15px; 
                                 text-align: justify; 
                                 word-break: keep-all; 
                             }}
@@ -268,24 +300,30 @@ I am <u>pleased</u> to invite you.
                     </head>
                     <body>
                         <div class="header-container">
-                            <div class="header-title">에스디에이치어학원 {header_title}</div>
+                            <div class="header-title">{header_title}</div>
                             <div class="header-sub">SDH ACADEMY Internal Exam System</div>
                         </div>
                         
-                        {questions_final_html}
+                        <div class="two-column-layout">
+                            {questions_html}
+                        </div>
                         
                         <div class="answers-section">
                             <div class="section-title">정답 및 해설</div>
-                            {answers_final_html}
+                            <div class="two-column-layout">
+                                {answers_html}
+                            </div>
                         </div>
                     </body>
                     </html>
                     '''
                     
-                    st.success("✅ 상세한 해설과 완벽한 레이아웃이 조립되었습니다!")
-                    st.download_button("📥 생성된 실전 시험지 다운로드", data=html_content, file_name="SDH_실전모의고사_완성본.html", mime="text/html")
+                    st.success("✅ [JSON 데이터 모델링 완료] 너른터급 퀄리티의 시험지가 조립되었습니다!")
+                    st.download_button("📥 상용 서비스급 고급 시험지 다운로드", data=html_content, file_name="SDH_Premium_Exam.html", mime="text/html")
+                except json.JSONDecodeError as e:
+                    st.error("AI가 구조화된 데이터(JSON)를 완벽하게 생성하지 못했습니다. 다시 시도해주세요.")
                 except Exception as e:
-                    st.error(f"AI 문제 생성 중 오류가 발생했습니다: {e}")
+                    st.error(f"오류가 발생했습니다: {e}")
 
 # ==========================================
 # 하단 푸터
