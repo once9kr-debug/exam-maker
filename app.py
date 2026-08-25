@@ -122,7 +122,6 @@ with tab_exam:
 
     st.markdown("---")
 
-    # 💥 수정 포인트: 그룹 구분을 모두 삭제하고, 18~45번을 10열 간격으로 깔끔하게 통합 배치
     st.markdown("<div class='group-header'>📖 2. 모의고사 지문(번호) 선택</div>", unsafe_allow_html=True)
     
     q_all = st.checkbox("✅ 전체 지문 선택", key="q_all")
@@ -335,7 +334,7 @@ with tab_exam:
                     <body>
                         <div class="header-container">
                             <div class="header-title">{header_title}</div>
-                            <div class="header-sub">SDH Premium Decoding & Internal Exam System</div>
+                            <div class="header-sub">SDH ACADEMY & Internal Exam System</div>
                         </div>
                         <div class="two-column-layout">
                             {questions_html}
@@ -349,7 +348,7 @@ with tab_exam:
                     </body>
                     </html>
                     '''
-                    st.success("✅ 지문 번호 그룹이 해제되고 깔끔하게 통합되었습니다!")
+                    st.success("✅ 오류 수정 완료! 변수들이 정상적으로 연결되었습니다.")
                     st.download_button("📥 상용 서비스급 시험지 다운로드", data=html_content, file_name="SDH_Premium_Exam.html", mime="text/html")
                 except json.JSONDecodeError as e:
                     st.error("AI가 구조화된 데이터를 생성하지 못했습니다. 다시 시도해주세요.")
