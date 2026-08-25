@@ -14,16 +14,10 @@ st.markdown("---")
 # ==========================================
 tab_workbook, tab_exam = st.tabs(["📚 워크북 제작", "🎯 변형문제 제작"])
 
-# ------------------------------------------
-# 탭 1: 워크북 제작 (UI 뼈대)
-# ------------------------------------------
 with tab_workbook:
     st.subheader("📖 모의고사 워크북 제작")
     st.info("워크북 제작 기능은 준비 중입니다.")
 
-# ------------------------------------------
-# 탭 2: 내신 변형문제 제작 (출력 테스트 모드)
-# ------------------------------------------
 with tab_exam:
     st.subheader("🎯 1. 출제 범위 선택 (모의고사)")
     
@@ -64,51 +58,41 @@ with tab_exam:
     st.markdown("---")
     
     # ------------------------------------------
-    # 실행 버튼 (레이아웃 테스트 로직)
+    # 실행 버튼 (수능 포맷 레이아웃 테스트 로직)
     # ------------------------------------------
     if st.button("🚀 출력 레이아웃 테스트 (임시 데이터로 문서 생성)", type="primary", use_container_width=True):
-        with st.spinner("완벽한 2단 레이아웃 문서를 조립하고 있습니다..."):
+        with st.spinner("수능 포맷에 맞춘 완벽한 2단 문서를 조립하고 있습니다..."):
             
-            # 💥 AI가 응답할 가짜 데이터(Dummy Data) - 테스트를 위해 모든 패턴을 담았습니다.
+            # 💥 수정 포인트: 가짜 데이터(Dummy)도 완벽한 수능 양식(지문 내 번호 포함)으로 변경
             dummy_response = '''
 [문제시작]
 1. 다음 글의 밑줄 친 부분 중, 어법상 틀린 것은?
 [박스시작]
 Dear Mr. Jones,
-I am writing to you on behalf of the student council. We would love to invite you <u>to be</u> one of our guest judges for the event. Your extensive background makes your evaluation deeply <u>valuable</u> to our students.
+I am writing to you on behalf of the student council. We would love to invite you ① <u>to be</u> one of our guest judges for the event. Your extensive background makes your evaluation deeply ② <u>valuable</u> to our students. The event will take place on Friday, October 20th. We would be honored to ③ <u>have</u> you join us. Please let us know ④ <u>if</u> you are able to attend. We look forward to ⑤ <u>hear</u> from you soon.
 [박스끝]
-① to be
-② valuable
-③ have
-④ if
-⑤ hear
 [정답시작]
-4
+5
 [해설시작]
-if는 명사절을 이끌 수 있으나 여기서는 쓰임이 어색합니다.
+look forward to의 to는 전치사이므로 동명사 hearing이 와야 합니다.
 [문제끝]
 
 [문제시작]
-2. 다음 글의 흐름으로 보아, 주어진 문장이 들어가기에 가장 적절한 곳은? (다중 박스 테스트)
+2. 글의 흐름으로 보아, 주어진 문장이 들어가기에 가장 적절한 곳은?
 [박스시작]
 However, this reliance on familiar categories can also create cognitive biases.
 [박스끝]
 [박스시작]
 When encountering a new situation, the human brain attempts to categorize the information based on prior experiences. ( ① ) This cognitive process helps us process complex data quickly. ( ② ) By comparing novel stimuli to existing mental schemas, the brain can make rapid predictions. ( ③ ) When we force a unique experience into an ill-fitting category, we risk ignoring subtle nuances. ( ④ ) Therefore, while mental categorization is essential for efficiency, remaining open to new perspectives is equally crucial. ( ⑤ )
 [박스끝]
-① 
-② 
-③ 
-④ 
-⑤ 
 [정답시작]
 3
 [해설시작]
-However로 시작하는 역접 문장이므로 문맥 흐름상 3번 위치가 가장 적절합니다.
+However로 시작하는 역접 문장이므로 장단점이 전환되는 3번 위치가 가장 적절합니다.
 [문제끝]
 
 [문제시작]
-3. 다음 글의 빈칸에 들어갈 말로 가장 적절한 것은? (선택지 긴 문장 테스트)
+3. 다음 글의 빈칸에 들어갈 말로 가장 적절한 것은?
 [박스시작]
 In today's fast-paced world, it is important to take time for yourself. Constant connectivity and packed schedules often leave us feeling overwhelmed and exhausted. Pausing your daily routine allows your mind to rest, process information, and regain balance. Therefore, setting aside moments for self-care is not a luxury, but an essential component of _________________.
 [박스끝]
@@ -124,7 +108,7 @@ In today's fast-paced world, it is important to take time for yourself. Constant
 [문제끝]
 '''
             
-            # 파이썬 파싱 로직 (이전에 완성한 완벽한 룰 적용)
+            # 파이썬 파싱 로직 
             problems = dummy_response.strip().split('[문제끝]')
             valid_q_htmls = []
             valid_a_htmls = []
@@ -143,13 +127,13 @@ In today's fast-paced world, it is important to take time for yourself. Constant
                     q_main_escaped = q_main.replace('<', '&lt;').replace('>', '&gt;')
                     q_main_escaped = q_main_escaped.replace('&lt;u&gt;', '<u>').replace('&lt;/u&gt;', '</u>')
                     
-                    # 지문과 선택지 분리
+                    # 지문과 선택지 분리 (선택지가 없으면 빈 문자열로 처리됨)
                     last_end = q_main_escaped.rfind('[박스끝]')
                     if last_end != -1:
                         main_part = q_main_escaped[:last_end + len('[박스끝]')]
                         options_part = q_main_escaped[last_end + len('[박스끝]'):].strip()
                         
-                        # 지문 내 ①, ② 존재 시 선택지 제거
+                        # 지문 내 ①, ② 존재 시 선택지 완벽 제거 (수능 포맷 대응)
                         if '①' in main_part and '②' in main_part:
                             options_part = ""
                             
@@ -174,7 +158,7 @@ In today's fast-paced world, it is important to take time for yourself. Constant
                 except Exception as e:
                     continue
 
-            # Flexbox 레이아웃 조립
+            # Flexbox 조립
             questions_final_html = '<div class="flex-container">' + "".join(valid_q_htmls) + '</div>'
             answers_final_html = '<div class="flex-container">' + "".join(valid_a_htmls) + '</div>'
             
@@ -206,7 +190,6 @@ In today's fast-paced world, it is important to take time for yourself. Constant
                     .header-title {{ font-size: 16pt; font-weight: bold; margin-bottom: 5px; }}
                     .header-sub {{ font-size: 10pt; color: #555; }}
                     
-                    /* 지그재그(좌->우) 유연한 배치 */
                     .flex-container {{
                         display: flex;
                         flex-wrap: wrap;
@@ -220,14 +203,17 @@ In today's fast-paced world, it is important to take time for yourself. Constant
                         text-align: justify; 
                         word-break: keep-all; 
                     }}
+                    
+                    /* 💥 수정 포인트: 박스 상하 여백을 대폭 줄여서 다중 박스가 밀착되도록 처리 */
                     .passage-box {{ 
                         border: 1.2px solid #000; 
                         padding: 10px 12px; 
-                        margin: 5px 0; 
+                        margin: 3px 0; /* 여백 축소 */
                         background-color: #fff;
                         text-align: justify;
                         word-break: break-all;
                     }}
+                    
                     .options-text {{
                         margin-top: 5px;
                         text-align: left; 
@@ -277,8 +263,8 @@ In today's fast-paced world, it is important to take time for yourself. Constant
             </html>
             '''
             
-            st.success("✅ 레이아웃 테스트 문서가 준비되었습니다! 다운로드 후 '인쇄(Ctrl+P)'를 눌러 확인해 보세요.")
-            st.download_button("📥 인쇄용 레이아웃 테스트 문서 다운로드", data=html_content, file_name="SDH_Layout_Test.html", mime="text/html")
+            st.success("✅ 수능 포맷(지문 내 번호) 및 다중 박스 밀착 디자인이 완벽히 준비되었습니다!")
+            st.download_button("📥 인쇄용 레이아웃 테스트 문서 다운로드", data=html_content, file_name="SDH_Layout_Test_CSAT.html", mime="text/html")
 
 # ==========================================
 # 하단 푸터
