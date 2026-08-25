@@ -29,9 +29,6 @@ st.markdown("---")
 
 tab_workbook, tab_exam = st.tabs(["📚 워크북 제작", "🎯 내신 변형문제 제작"])
 
-# ==========================================
-# 탭 1: 워크북 제작 화면
-# ==========================================
 with tab_workbook:
     st.subheader("📖 모의고사 워크북 검색 및 다운로드")
     
@@ -63,9 +60,6 @@ with tab_workbook:
         df.insert(0, "선택", False)
         st.data_editor(df, column_config={"선택": st.column_config.CheckboxColumn("선택", default=False)}, disabled=["자료명", "문항 수", "업로드일"], hide_index=True, use_container_width=True)
 
-# ==========================================
-# 탭 2: 내신 변형문제 출제 화면 (디테일 극강 튜닝)
-# ==========================================
 with tab_exam:
     st.subheader("🎯 1. 출제 범위 선택 (모의고사)")
     
@@ -112,13 +106,12 @@ with tab_exam:
         if not selected_q_nums or not selected_types:
             st.warning("지문 번호와 문제 유형을 각각 1개 이상 선택해주세요.")
         else:
-            with st.spinner("AI가 시험지와 정답지를 1줄 간격으로 정밀 조립하고 있습니다..."):
+            with st.spinner("AI가 시험지와 정답지를 최적의 공간으로 조립하고 있습니다..."):
                 passages_text = ""
                 for q in selected_q_nums:
                     text = mock_db.get(q, f"[{q} 지문 업데이트가 필요합니다]")
                     passages_text += f"[{q}]\n{text}\n\n"
 
-                # 💥 강력한 프롬프트 통제: 정답란에 군더더기를 적지 못하도록 족쇄 적용
                 prompt = f'''당신은 고등학교 내신 영어 출제 전문가입니다. 제공된 지문으로 변형 문제를 만드세요.
 [선택된 문제 유형]: {', '.join(selected_types)}
 [지문 목록]: {passages_text}
@@ -128,7 +121,7 @@ with tab_exam:
 2. 지문 내용은 반드시 [박스시작]과 [박스끝] 사이에 넣으세요.
 3. 객관식 선택지는 예외 없이 무조건 '①, ②, ③, ④, ⑤' 기호로 시작하세요.
 4. 밑줄 친 부분은 반드시 <u>단어</u> 형태의 HTML 태그를 사용하세요. 빈칸은 밑줄 5개(_____)로 표시하세요.
-5. [정답시작] 아래에는 문제 내용이나 부연 설명을 절대 쓰지 말고, 오직 '정답 번호(숫자)' 또는 '서술형 정답'만 간결하게 적으세요.
+5. [정답시작] 아래에는 오직 '정답 번호(숫자)' 또는 '서술형 정답'만 간결하게 적으세요.
 
 [출력 포맷 예시]
 [문제시작]
@@ -155,8 +148,8 @@ I am <u>pleased</u> to invite you.
                     raw_text = response.text.replace('```html', '').replace('```', '')
                     problems = raw_text.split('[문제끝]')
                     
-                    questions_html = ""
-                    answers_html = ""
+                    valid_q_htmls = []
+                    valid_a_htmls = []
                     
                     for prob in problems:
                         if '[문제시작]' not in prob: continue
@@ -165,28 +158,56 @@ I am <u>pleased</u> to invite you.
                             ans_part = prob.split('[정답시작]')[1].split('[해설시작]')[0].strip()
                             exp_part = prob.split('[해설시작]')[1].strip()
                             
-                            # 💥 문제 번호만 추출 (예: "1. 다음 글의..." -> "1")
                             first_line = q_main.split('\n')[0].strip()
                             q_num = first_line.split('.')[0] if '.' in first_line else "★"
                             
-                            q_html = q_main.replace('<', '&lt;').replace('>', '&gt;')
-                            q_html = q_html.replace('&lt;u&gt;', '<u>').replace('&lt;/u&gt;', '</u>')
+                            # 💥 박스 내용과 선택지 분리 로직 (중복 선택지 제거를 위함)
+                            if '[박스시작]' in q_main and '[박스끝]' in q_main:
+                                pre_box = q_main.split('[박스시작]')[0].strip()
+                                box_content = q_main.split('[박스시작]')[1].split('[박스끝]')[0].strip()
+                                options_content = q_main.split('[박스끝]')[1].strip()
+                                
+                                # 💥 핵심 로직: 지문 안에 ①, ② 기호가 있으면 하단 선택지 삭제
+                                if '①' in box_content and '②' in box_content:
+                                    options_content = ""
+                                
+                                # HTML 조립 및 줄바꿈 처리
+                                pre_box_html = pre_box.replace('<', '&lt;').replace('>', '&gt;').replace('\n', '<br/>')
+                                box_content_html = box_content.replace('<', '&lt;').replace('>', '&gt;')
+                                box_content_html = box_content_html.replace('&lt;u&gt;', '<u>').replace('&lt;/u&gt;', '</u>').replace('\n', '<br/>')
+                                options_content_html = options_content.replace('<', '&lt;').replace('>', '&gt;').replace('\n', '<br/>')
+                                
+                                q_html = f"{pre_box_html}"
+                                q_html += f'<div class="passage-box">{box_content_html}</div>'
+                                if options_content_html:
+                                    q_html += f'<div class="options-text">{options_content_html}</div>'
+                            else:
+                                q_html = q_main.replace('<', '&lt;').replace('>', '&gt;').replace('&lt;u&gt;', '<u>').replace('&lt;/u&gt;', '</u>').replace('\n', '<br/>')
                             
-                            # 줄바꿈 처리 및 쓸데없는 여백 치환
-                            q_html = q_html.replace('\n', '<br/>')
-                            q_html = q_html.replace('[박스시작]<br/>', '[박스시작]').replace('<br/>[박스끝]', '[박스끝]')
+                            valid_q_htmls.append(f"<div class='question-block'>{q_html}</div>")
                             
-                            # 지문 박스 디자인 적용
-                            q_html = q_html.replace('[박스시작]', '<div class="passage-box">')
-                            q_html = q_html.replace('[박스끝]', '</div>')
-                            
-                            questions_html += f"<div class='question-block'>{q_html}</div>"
-                            
-                            # 해설지 파트 조립 (문제 번호 매칭)
+                            # 💥 정답 포맷 변경: 1. [정답] 2
                             a_html = exp_part.replace('<', '&lt;').replace('>', '&gt;').replace('\n', '<br/>')
-                            answers_html += f"<div class='answer-block'><b>{q_num}번 정답: {ans_part}</b><br/><b>[해설]</b> {a_html}</div>"
-                        except:
+                            valid_a_htmls.append(f"<div class='answer-block'><b>{q_num}. [정답] {ans_part}</b><br/><b>[해설]</b> {a_html}</div>")
+                        except Exception as e:
                             continue
+
+                    # 💥 1페이지당 4문제씩 강제 분할 로직
+                    questions_final_html = ""
+                    for i in range(0, len(valid_q_htmls), 4):
+                        chunk = valid_q_htmls[i:i+4]
+                        questions_final_html += '<div class="two-column-layout">' + "".join(chunk) + '</div>'
+                        # 마지막 묶음이 아니면 페이지 브레이크 삽입
+                        if i + 4 < len(valid_q_htmls):
+                            questions_final_html += '<div style="page-break-after: always;"></div>'
+
+                    # 해설지도 4문제 단위로 분할하여 깔끔하게 정리
+                    answers_final_html = ""
+                    for i in range(0, len(valid_a_htmls), 4):
+                        chunk = valid_a_htmls[i:i+4]
+                        answers_final_html += '<div class="two-column-layout">' + "".join(chunk) + '</div>'
+                        if i + 4 < len(valid_a_htmls):
+                            answers_final_html += '<div style="page-break-after: always;"></div>'
 
                     header_title = f"{exam_year} {exam_month} {exam_grade} 모의고사 변형문제"
                     
@@ -212,7 +233,7 @@ I am <u>pleased</u> to invite you.
                                 text-align: center;
                                 border-bottom: 2px solid #000; 
                                 padding-bottom: 15px; 
-                                margin-bottom: 30px; 
+                                margin-bottom: 25px; 
                             }}
                             .header-title {{ font-size: 16pt; font-weight: bold; margin-bottom: 5px; }}
                             .header-sub {{ font-size: 10pt; color: #555; }}
@@ -225,19 +246,23 @@ I am <u>pleased</u> to invite you.
                             .question-block {{ 
                                 break-inside: avoid; 
                                 page-break-inside: avoid; 
-                                margin-bottom: 35px; 
+                                margin-bottom: 30px; 
                                 text-align: justify; 
                                 word-break: keep-all; 
                             }}
                             
-                            /* 💥 수정 포인트: 마진을 1줄(15px)로 좁히고, 긴 밑줄이 튀어나가지 않게 break-all 설정 */
+                            /* 💥 수정 포인트: 박스 여백을 5px로 극단적으로 좁힘 */
                             .passage-box {{ 
                                 border: 1.2px solid #000; 
-                                padding: 12px 15px; 
-                                margin: 15px 0; /* 위아래 딱 1줄 정도의 간격 */
+                                padding: 10px 12px; 
+                                margin: 5px 0; 
                                 background-color: #fff;
                                 text-align: justify;
-                                word-break: break-all; /* 긴 빈칸 밑줄이 박스를 뚫지 못하게 방어 */
+                                word-break: break-all;
+                            }}
+                            
+                            .options-text {{
+                                margin-top: 2px; /* 선택지와 박스 사이 간격 최소화 */
                             }}
                             
                             .answers-section {{ 
@@ -251,7 +276,7 @@ I am <u>pleased</u> to invite you.
                                 text-align: center; 
                                 border-bottom: 1px solid #000; 
                                 padding-bottom: 10px; 
-                                margin-bottom: 30px; 
+                                margin-bottom: 25px; 
                             }}
                             .answer-block {{ 
                                 break-inside: avoid; 
@@ -273,23 +298,20 @@ I am <u>pleased</u> to invite you.
                             <div class="header-sub">SDH Premium Decoding & Internal Exam System</div>
                         </div>
                         
-                        <div class="two-column-layout">
-                            {questions_html}
-                        </div>
+                        <!-- 1페이지당 4문제씩 분할된 시험지 -->
+                        {questions_final_html}
                         
                         <div class="answers-section">
                             <div class="section-title">정답 및 해설</div>
-                            <!-- 💥 수정 포인트: 해설지도 똑같이 2단으로 출력되도록 클래스 적용 -->
-                            <div class="two-column-layout">
-                                {answers_html}
-                            </div>
+                            <!-- 해설지도 깔끔하게 4문제 단위로 2단 분할 -->
+                            {answers_final_html}
                         </div>
                     </body>
                     </html>
                     '''
                     
-                    st.success("✅ 지적해주신 6가지 디테일이 완벽히 수정되었습니다!")
-                    st.download_button("📥 인쇄용 웹 문서(HTML) 다운로드", data=html_content, file_name="SDH_실전모의고사_최종본.html", mime="text/html")
+                    st.success("✅ 공간 최적화 및 1페이지 4문항 분할 적용이 완료되었습니다!")
+                    st.download_button("📥 인쇄용 웹 문서(HTML) 다운로드", data=html_content, file_name="SDH_실전모의고사_최종완성.html", mime="text/html")
                 except Exception as e:
                     st.error(f"오류가 발생했습니다: {e}")
 
