@@ -1,4 +1,5 @@
 import streamlit as st
+import pandas as pd
 
 # ==========================================
 # 페이지 기본 설정
@@ -19,26 +20,22 @@ tab_workbook, tab_exam = st.tabs(["📚 워크북 제작", "🎯 변형문제 �
 with tab_workbook:
     st.subheader("📖 모의고사 워크북 제작")
     st.info("워크북 제작 기능은 준비 중입니다.")
-    # 향후 워크북 관련 UI가 추가될 자리입니다.
 
 # ------------------------------------------
-# 탭 2: 내신 변형문제 제작 (UI 뼈대)
+# 탭 2: 내신 변형문제 제작 (출력 테스트 모드)
 # ------------------------------------------
 with tab_exam:
     st.subheader("🎯 1. 출제 범위 선택 (모의고사)")
     
-    # 학년, 연도, 월 선택 드롭다운
     col1, col2, col3 = st.columns(3)
     with col1:
-        st.selectbox("대상 학년", ["고1", "고2", "고3"])
+        exam_grade = st.selectbox("대상 학년", ["고1", "고2", "고3"])
     with col2:
-        st.selectbox("모의고사 연도", ["2026년", "2025년", "2024년"])
+        exam_year = st.selectbox("모의고사 연도", ["2026년", "2025년", "2024년"])
     with col3:
-        st.selectbox("시행 월", ["3월", "6월", "9월", "11월"])
+        exam_month = st.selectbox("시행 월", ["3월", "6월", "9월", "11월"])
         
     st.write("")
-    
-    # 지문 선택 체크박스
     st.checkbox("✅ 전체 지문 선택", key="select_all_q")
     
     q_cols = st.columns(10)
@@ -47,10 +44,7 @@ with tab_exam:
             st.checkbox(f"{q_num}번", key=f"q_{q_num}")
 
     st.markdown("---")
-    
     st.subheader("🎯 2. 문제 유형 선택")
-    
-    # 문제 유형 선택 체크박스
     st.checkbox("✅ 전체 유형 선택", key="select_all_types")
     
     t_col1, t_col2, t_col3, t_col4 = st.columns(4)
@@ -70,15 +64,224 @@ with tab_exam:
     st.markdown("---")
     
     # ------------------------------------------
-    # 실행 버튼
+    # 실행 버튼 (레이아웃 테스트 로직)
     # ------------------------------------------
-    if st.button("🚀 변형문제 생성 및 인쇄용 문서 다운로드", type="primary", use_container_width=True):
-        # 향후 Gemini API 호출 및 HTML/PDF 문서 생성 로직이 들어갈 자리입니다.
-        st.success("성공적으로 요청이 접수되었습니다! (여기에 API 연동 및 문서 생성 로직이 추가됩니다.)")
+    if st.button("🚀 출력 레이아웃 테스트 (임시 데이터로 문서 생성)", type="primary", use_container_width=True):
+        with st.spinner("완벽한 2단 레이아웃 문서를 조립하고 있습니다..."):
+            
+            # 💥 AI가 응답할 가짜 데이터(Dummy Data) - 테스트를 위해 모든 패턴을 담았습니다.
+            dummy_response = '''
+[문제시작]
+1. 다음 글의 밑줄 친 부분 중, 어법상 틀린 것은?
+[박스시작]
+Dear Mr. Jones,
+I am writing to you on behalf of the student council. We would love to invite you <u>to be</u> one of our guest judges for the event. Your extensive background makes your evaluation deeply <u>valuable</u> to our students.
+[박스끝]
+① to be
+② valuable
+③ have
+④ if
+⑤ hear
+[정답시작]
+4
+[해설시작]
+if는 명사절을 이끌 수 있으나 여기서는 쓰임이 어색합니다.
+[문제끝]
+
+[문제시작]
+2. 다음 글의 흐름으로 보아, 주어진 문장이 들어가기에 가장 적절한 곳은? (다중 박스 테스트)
+[박스시작]
+However, this reliance on familiar categories can also create cognitive biases.
+[박스끝]
+[박스시작]
+When encountering a new situation, the human brain attempts to categorize the information based on prior experiences. ( ① ) This cognitive process helps us process complex data quickly. ( ② ) By comparing novel stimuli to existing mental schemas, the brain can make rapid predictions. ( ③ ) When we force a unique experience into an ill-fitting category, we risk ignoring subtle nuances. ( ④ ) Therefore, while mental categorization is essential for efficiency, remaining open to new perspectives is equally crucial. ( ⑤ )
+[박스끝]
+① 
+② 
+③ 
+④ 
+⑤ 
+[정답시작]
+3
+[해설시작]
+However로 시작하는 역접 문장이므로 문맥 흐름상 3번 위치가 가장 적절합니다.
+[문제끝]
+
+[문제시작]
+3. 다음 글의 빈칸에 들어갈 말로 가장 적절한 것은? (선택지 긴 문장 테스트)
+[박스시작]
+In today's fast-paced world, it is important to take time for yourself. Constant connectivity and packed schedules often leave us feeling overwhelmed and exhausted. Pausing your daily routine allows your mind to rest, process information, and regain balance. Therefore, setting aside moments for self-care is not a luxury, but an essential component of _________________.
+[박스끝]
+① ignoring all daily work responsibilities
+② maintaining a healthy and sustainable life
+③ building a larger network of business partners
+④ competing successfully against your coworkers
+⑤ adapting to rapidly changing digital technologies
+[정답시작]
+2
+[해설시작]
+자기 관리를 위한 시간을 갖는 것은 건강하고 지속 가능한 삶을 유지하는 데 필수적이라는 내용입니다.
+[문제끝]
+'''
+            
+            # 파이썬 파싱 로직 (이전에 완성한 완벽한 룰 적용)
+            problems = dummy_response.strip().split('[문제끝]')
+            valid_q_htmls = []
+            valid_a_htmls = []
+            
+            for prob in problems:
+                if '[문제시작]' not in prob: continue
+                try:
+                    q_main = prob.split('[문제시작]')[1].split('[정답시작]')[0].strip()
+                    ans_part = prob.split('[정답시작]')[1].split('[해설시작]')[0].strip()
+                    exp_part = prob.split('[해설시작]')[1].strip()
+                    
+                    first_line = q_main.split('\n')[0].strip()
+                    q_num = first_line.split('.')[0] if '.' in first_line else "★"
+                    
+                    # 태그 보호
+                    q_main_escaped = q_main.replace('<', '&lt;').replace('>', '&gt;')
+                    q_main_escaped = q_main_escaped.replace('&lt;u&gt;', '<u>').replace('&lt;/u&gt;', '</u>')
+                    
+                    # 지문과 선택지 분리
+                    last_end = q_main_escaped.rfind('[박스끝]')
+                    if last_end != -1:
+                        main_part = q_main_escaped[:last_end + len('[박스끝]')]
+                        options_part = q_main_escaped[last_end + len('[박스끝]'):].strip()
+                        
+                        # 지문 내 ①, ② 존재 시 선택지 제거
+                        if '①' in main_part and '②' in main_part:
+                            options_part = ""
+                            
+                        # 박스 치환
+                        main_part = main_part.replace('\n', '<br/>')
+                        main_part = main_part.replace('[박스시작]<br/>', '[박스시작]').replace('<br/>[박스끝]', '[박스끝]')
+                        main_part = main_part.replace('[박스시작]', '<div class="passage-box">')
+                        main_part = main_part.replace('[박스끝]', '</div>')
+                        
+                        options_html = options_part.replace('\n', '<br/>')
+                        
+                        q_html = main_part
+                        if options_html:
+                            q_html += f'<div class="options-text">{options_html}</div>'
+                    else:
+                        q_html = q_main_escaped.replace('\n', '<br/>')
+                    
+                    valid_q_htmls.append(f"<div class='question-block'>{q_html}</div>")
+                    
+                    a_html = exp_part.replace('<', '&lt;').replace('>', '&gt;').replace('\n', '<br/>')
+                    valid_a_htmls.append(f"<div class='answer-block'><b>{q_num}. [정답] {ans_part}</b><br/><b>[해설]</b> {a_html}</div>")
+                except Exception as e:
+                    continue
+
+            # Flexbox 레이아웃 조립
+            questions_final_html = '<div class="flex-container">' + "".join(valid_q_htmls) + '</div>'
+            answers_final_html = '<div class="flex-container">' + "".join(valid_a_htmls) + '</div>'
+            
+            header_title = f"{exam_year} {exam_month} {exam_grade} 모의고사 변형문제"
+            
+            html_content = f'''
+            <!DOCTYPE html>
+            <html lang="ko">
+            <head>
+                <meta charset="utf-8">
+                <title>{header_title}</title>
+                <style>
+                    @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;700&display=swap');
+                    body {{ 
+                        font-family: 'Noto Sans KR', sans-serif; 
+                        font-size: 10.5pt; 
+                        line-height: 1.5; 
+                        color: #000; 
+                        max-width: 210mm;
+                        margin: 0 auto;
+                        padding: 20px;
+                    }}
+                    .header-container {{ 
+                        text-align: center;
+                        border-bottom: 2px solid #000; 
+                        padding-bottom: 15px; 
+                        margin-bottom: 25px; 
+                    }}
+                    .header-title {{ font-size: 16pt; font-weight: bold; margin-bottom: 5px; }}
+                    .header-sub {{ font-size: 10pt; color: #555; }}
+                    
+                    /* 지그재그(좌->우) 유연한 배치 */
+                    .flex-container {{
+                        display: flex;
+                        flex-wrap: wrap;
+                        justify-content: space-between;
+                    }}
+                    .question-block {{ 
+                        width: 48%; 
+                        break-inside: avoid; 
+                        page-break-inside: avoid; 
+                        margin-bottom: 45px; 
+                        text-align: justify; 
+                        word-break: keep-all; 
+                    }}
+                    .passage-box {{ 
+                        border: 1.2px solid #000; 
+                        padding: 10px 12px; 
+                        margin: 5px 0; 
+                        background-color: #fff;
+                        text-align: justify;
+                        word-break: break-all;
+                    }}
+                    .options-text {{
+                        margin-top: 5px;
+                        text-align: left; 
+                        word-break: keep-all;
+                    }}
+                    .answers-section {{ 
+                        break-before: page; 
+                        page-break-before: always; 
+                        margin-top: 50px; 
+                    }}
+                    .section-title {{ 
+                        font-size: 15pt; 
+                        font-weight: bold; 
+                        text-align: center; 
+                        border-bottom: 1px solid #000; 
+                        padding-bottom: 10px; 
+                        margin-bottom: 25px; 
+                    }}
+                    .answer-block {{ 
+                        width: 48%;
+                        break-inside: avoid; 
+                        page-break-inside: avoid;
+                        margin-bottom: 35px; 
+                        text-align: justify; 
+                        word-break: keep-all; 
+                    }}
+                    
+                    @media print {{
+                        @page {{ margin: 15mm; }}
+                        body {{ padding: 0; }}
+                    }}
+                </style>
+            </head>
+            <body>
+                <div class="header-container">
+                    <div class="header-title">에스디에이치어학원 {header_title}</div>
+                    <div class="header-sub">SDH ACADEMY Internal Exam System</div>
+                </div>
+                
+                {questions_final_html}
+                
+                <div class="answers-section">
+                    <div class="section-title">정답 및 해설</div>
+                    {answers_final_html}
+                </div>
+            </body>
+            </html>
+            '''
+            
+            st.success("✅ 레이아웃 테스트 문서가 준비되었습니다! 다운로드 후 '인쇄(Ctrl+P)'를 눌러 확인해 보세요.")
+            st.download_button("📥 인쇄용 레이아웃 테스트 문서 다운로드", data=html_content, file_name="SDH_Layout_Test.html", mime="text/html")
 
 # ==========================================
 # 하단 푸터
 # ==========================================
 st.markdown("---")
-# 💥 수정 포인트: 1학기 교재명 삭제 및 시스템 이름으로 깔끔하게 변경
 st.markdown("<div style='text-align: center; color: gray; font-size: 12px;'>SDH ACADEMY Internal Exam System</div>", unsafe_allow_html=True)
