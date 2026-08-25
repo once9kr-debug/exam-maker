@@ -1,5 +1,4 @@
 streamlit
 google-generativeai
-xhtml2pdf
 pandas
-
+python-docx
