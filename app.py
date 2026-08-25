@@ -96,7 +96,6 @@ with tab_exam:
                     text = mock_db.get(q, f"[{q} 지문 업데이트가 필요합니다]")
                     passages_text += f"[지문 {idx+1} - {q}]\n{text}\n\n"
 
-                # 💥 AI에게 HTML 디자인을 금지하고 오직 순수 JSON 데이터만 요구하는 마스터 프롬프트
                 prompt = f'''당신은 고등학교 내신 영어 출제 전문가입니다. 제공된 지문으로 변형 문제를 만드세요.
 [선택된 문제 유형]: {', '.join(final_selected_types)}
 [지문 목록]: {passages_text}
@@ -133,7 +132,7 @@ with tab_exam:
                     model = genai.GenerativeModel('gemini-3.6-flash')
                     response = model.generate_content(prompt)
                     
-                    # 2. JSON 파싱 및 데이터 정제
+                    # 2. JSON 파싱
                     raw_text = response.text.strip()
                     if raw_text.startswith("```json"):
                         raw_text = raw_text[7:]
@@ -144,24 +143,24 @@ with tab_exam:
                         
                     problems_data = json.loads(raw_text.strip())
                     
-                    # 3. 파이썬을 이용한 완벽한 렌더링 (디자인 통제)
+                    # 3. 파이썬 기반 렌더링
                     questions_html = ""
                     answers_html = ""
                     
                     for idx, data in enumerate(problems_data):
-                        # 문제 제목
                         q_title = data.get("question", f"{idx+1}. 문제가 누락되었습니다.")
-                        # 지문 렌더링 (삽입 문제용 이중 박스 처리 로직 포함)
+                        
                         passage_raw = data.get("passage", "")
                         if "[박스]" in passage_raw and "[/박스]" in passage_raw:
                             inserted_box = passage_raw.split("[박스]")[1].split("[/박스]")[0]
                             main_passage = passage_raw.split("[/박스]")[1].strip()
-                            passage_html = f'<div class="passage-box" style="margin-bottom: 8px;">{inserted_box}</div>'
+                            # 💥 박스 여백(padding)을 줄여서 타이트하게 수정
+                            passage_html = f'<div class="passage-box" style="margin-bottom: 5px;">{inserted_box}</div>'
                             passage_html += f'<div class="passage-box">{main_passage}</div>'
                         else:
+                            # 💥 박스 여백(padding)을 줄여서 타이트하게 수정
                             passage_html = f'<div class="passage-box">{passage_raw}</div>'
                         
-                        # 지능형 선택지 렌더링 (길이에 따라 유동적으로 가로 배열)
                         options_html = ""
                         options = data.get("options", [])
                         if options and len(options) > 0:
@@ -170,7 +169,6 @@ with tab_exam:
                                 options_html += f'<div class="option-item">{opt}</div>'
                             options_html += '</div>'
                             
-                        # 해설지 렌더링 (너른터 스타일의 한 문단 압축형)
                         q_num_only = q_title.split('.')[0] if '.' in q_title else str(idx+1)
                         answer = data.get("answer", "")
                         explanation = data.get("explanation", "")
@@ -183,13 +181,15 @@ with tab_exam:
                         </div>
                         '''
                         
+                        # 💥 정답 아래에 줄바꿈(<br/>)을 추가하여 해설이 다음 줄로 내려가도록 수정
                         answers_html += f'''
                         <div class="answer-block">
-                            <b>{q_num_only}번 - {answer}</b> <b>[해설]</b> {explanation}
+                            <b>{q_num_only}번 - {answer}</b><br/>
+                            <b>[해설]</b> {explanation}
                         </div>
                         '''
 
-                    # 4. 최종 HTML/CSS 병합 (명조체/바탕체 적용)
+                    # 4. 최종 HTML/CSS 병합
                     header_title = f"{exam_year} {exam_month} {exam_grade} 모의고사 변형문제"
                     
                     html_content = f'''
@@ -199,12 +199,11 @@ with tab_exam:
                         <meta charset="utf-8">
                         <title>{header_title}</title>
                         <style>
-                            /* 상용 모의고사 전용 명조체 적용 */
                             @import url('https://fonts.googleapis.com/css2?family=Nanum+Myeongjo:wght@400;700&display=swap');
                             @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@700&display=swap');
                             
                             body {{ 
-                                font-family: 'Nanum Myeongjo', serif; /* 본문 명조체 */
+                                font-family: 'Nanum Myeongjo', serif; 
                                 font-size: 10.5pt; 
                                 line-height: 1.5; 
                                 color: #000; 
@@ -214,7 +213,7 @@ with tab_exam:
                             }}
                             
                             .header-container {{ 
-                                font-family: 'Noto Sans KR', sans-serif; /* 제목만 고딕체 */
+                                font-family: 'Noto Sans KR', sans-serif; 
                                 display: flex;
                                 justify-content: space-between;
                                 align-items: flex-end;
@@ -234,7 +233,7 @@ with tab_exam:
                             .question-block {{ 
                                 break-inside: avoid; 
                                 page-break-inside: avoid; 
-                                margin-bottom: 45px; 
+                                margin-bottom: 40px; 
                                 text-align: justify; 
                                 word-break: keep-all; 
                             }}
@@ -245,9 +244,10 @@ with tab_exam:
                                 margin-bottom: 6px;
                             }}
                             
+                            /* 💥 박스 내부 위아래 빈 공간(padding)을 5px로 줄여 타이트하게 밀착 */
                             .passage-box {{ 
-                                border: 1px solid #000; 
-                                padding: 10px 12px; 
+                                border: 1.1px solid #000; 
+                                padding: 5px 10px; 
                                 margin: 3px 0; 
                                 background-color: #fff;
                                 text-align: justify;
@@ -255,14 +255,14 @@ with tab_exam:
                                 overflow-wrap: break-word; 
                             }}
                             
-                            /* 지능적 선택지 가로 배열 로직 */
+                            /* 💥 억지로 두 줄로 접히는 것을 방지하는 inline-block 적용 */
                             .options-container {{
-                                display: flex;
-                                flex-wrap: wrap;
-                                margin-top: 5px;
+                                margin-top: 6px;
                             }}
                             .option-item {{
-                                margin-right: 18px; /* 가로 여백 */
+                                display: inline-block;
+                                margin-right: 18px; 
+                                margin-bottom: 4px;
                                 text-align: left; 
                                 word-break: keep-all;
                             }}
@@ -283,7 +283,6 @@ with tab_exam:
                                 margin-bottom: 25px; 
                             }}
                             
-                            /* 해설지 압축 포맷 */
                             .answer-block {{ 
                                 break-inside: avoid; 
                                 page-break-inside: avoid;
@@ -318,7 +317,7 @@ with tab_exam:
                     </html>
                     '''
                     
-                    st.success("✅ [JSON 데이터 모델링 완료] 너른터급 퀄리티의 시험지가 조립되었습니다!")
+                    st.success("✅ 디테일 최적화 완료! 완벽한 시험지가 조립되었습니다.")
                     st.download_button("📥 상용 서비스급 고급 시험지 다운로드", data=html_content, file_name="SDH_Premium_Exam.html", mime="text/html")
                 except json.JSONDecodeError as e:
                     st.error("AI가 구조화된 데이터(JSON)를 완벽하게 생성하지 못했습니다. 다시 시도해주세요.")
