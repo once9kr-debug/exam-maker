@@ -4,16 +4,12 @@ import google.generativeai as genai
 
 st.set_page_config(page_title="내신 출제 플랫폼", layout="wide")
 
-# ==========================================
-# 기본 세팅 (API)
-# ==========================================
 if "GEMINI_API_KEY" in st.secrets:
     genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
 else:
     st.error("API 키가 설정되지 않았습니다. Secrets 설정을 확인해 주세요.")
     st.stop()
 
-# 공통 지문 DB (임시 샘플)
 mock_db = {
     "18번": "Dear Mr. Jones,\nI am writing to you on behalf of the student council...",
     "19번": "As I walked into the dark room, my heart started to beat faster...",
@@ -29,25 +25,17 @@ st.markdown("---")
 
 tab_workbook, tab_exam = st.tabs(["📚 워크북 제작", "🎯 내신 변형문제 제작"])
 
-# ==========================================
-# 탭 1: 워크북 제작 화면
-# ==========================================
 with tab_workbook:
     st.subheader("📖 모의고사 워크북 검색 및 다운로드")
-    
     col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        grade_wb = st.selectbox("학년", ["고1", "고2", "고3"], index=1, key="wb_grade")
-    with col2:
-        year_wb = st.selectbox("연도", ["2026년", "2025년", "2024년", "2023년"], key="wb_year")
-    with col3:
-        month_wb = st.selectbox("시행 월", ["3월", "6월", "9월", "11월"], key="wb_month")
+    with col1: grade_wb = st.selectbox("학년", ["고1", "고2", "고3"], index=1, key="wb_grade")
+    with col2: year_wb = st.selectbox("연도", ["2026년", "2025년", "2024년", "2023년"], key="wb_year")
+    with col3: month_wb = st.selectbox("시행 월", ["3월", "6월", "9월", "11월"], key="wb_month")
     with col4:
         st.write("") 
         search_btn = st.button("🔍 자료 검색", use_container_width=True)
         
     st.markdown("---")
-    
     if search_btn:
         st.success(f"✅ {year_wb} {month_wb} {grade_wb} 모의고사 워크북 목록을 불러왔습니다.")
         data = {
@@ -63,19 +51,12 @@ with tab_workbook:
         df.insert(0, "선택", False)
         st.data_editor(df, column_config={"선택": st.column_config.CheckboxColumn("선택", default=False)}, disabled=["자료명", "문항 수", "업로드일"], hide_index=True, use_container_width=True)
 
-# ==========================================
-# 탭 2: 내신 변형문제 출제 화면 (HTML 렌더링 방식)
-# ==========================================
 with tab_exam:
     st.subheader("🎯 1. 출제 범위 선택 (모의고사)")
-    
     exam_col1, exam_col2, exam_col3 = st.columns(3)
-    with exam_col1:
-        exam_grade = st.selectbox("대상 학년", ["고1", "고2", "고3"], key="exam_grade_select", index=0)
-    with exam_col2:
-        exam_year = st.selectbox("모의고사 연도", ["2026년", "2025년", "2024년"], key="exam_year_select")
-    with exam_col3:
-        exam_month = st.selectbox("시행 월", ["3월", "6월", "9월", "11월"], key="exam_month_select", index=1)
+    with exam_col1: exam_grade = st.selectbox("대상 학년", ["고1", "고2", "고3"], key="exam_grade_select", index=0)
+    with exam_col2: exam_year = st.selectbox("모의고사 연도", ["2026년", "2025년", "2024년"], key="exam_year_select")
+    with exam_col3: exam_month = st.selectbox("시행 월", ["3월", "6월", "9월", "11월"], key="exam_month_select", index=1)
         
     st.write("")
     select_all_q = st.checkbox("✅ **전체 지문 선택**", key="exam_all_q")
@@ -87,7 +68,6 @@ with tab_exam:
                 selected_q_nums.append(f"{q_num}번")
 
     st.markdown("---")
-    
     st.subheader("🎯 2. 문제 유형 선택")
     select_all_types = st.checkbox("✅ **전체 유형 선택**", key="exam_all_types")
     selected_types = []
@@ -171,11 +151,9 @@ I am <u>pleased</u> to invite you.
                             
                             q_html = q_html.replace('[박스시작]<br/>', '[박스시작]').replace('<br/>[박스끝]', '[박스끝]')
                             
-                            # 쫀쫀한 박스 디자인 적용
                             q_html = q_html.replace('[박스시작]', '<div class="passage-box">')
                             q_html = q_html.replace('[박스끝]', '</div>')
                             
-                            # break-inside: avoid 로 문제가 반으로 쪼개지는 것을 방지!
                             questions_html += f"<div class='question-block'>{q_html}</div>"
                             
                             a_html = exp_part.replace('<', '&lt;').replace('>', '&gt;').replace('\n', '<br/>')
@@ -185,7 +163,6 @@ I am <u>pleased</u> to invite you.
 
                     header_title = f"{exam_year} {exam_month} {exam_grade} 모의고사 변형문제"
                     
-                    # 브라우저 인쇄 전용 최고급 CSS 스타일링
                     html_content = f'''
                     <!DOCTYPE html>
                     <html lang="ko">
@@ -196,7 +173,7 @@ I am <u>pleased</u> to invite you.
                             @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;700&display=swap');
                             body {{ 
                                 font-family: 'Noto Sans KR', sans-serif; 
-                                font-size: 11pt; 
+                                font-size: 10.5pt; 
                                 line-height: 1.6; 
                                 color: #000; 
                                 max-width: 210mm;
@@ -204,69 +181,76 @@ I am <u>pleased</u> to invite you.
                                 padding: 20px;
                             }}
                             
-                            /* 헤더 디자인 */
-                            .header-container {{ border-bottom: 2px solid #000; margin-bottom: 20px; padding-bottom: 10px; display: flex; justify-content: space-between; align-items: flex-end; }}
-                            .header-title {{ font-size: 16pt; font-weight: bold; }}
-                            .header-sub {{ font-size: 10pt; color: #555; }}
-                            
-                            /* 💥 핵심: 완벽한 2단 레이아웃 (브라우저가 알아서 겹치지 않게 나눔) */
-                            .two-column-layout {{
-                                column-count: 2;
-                                column-gap: 40px;
+                            /* 💥 수정 1: 헤더 중앙 정렬 및 디자인 정돈 */
+                            .header-container {{ 
+                                text-align: center;
+                                border-bottom: 2px solid #000; 
+                                padding-bottom: 15px; 
+                                margin-bottom: 30px; 
+                            }}
+                            .header-title {{ 
+                                font-size: 16pt; 
+                                font-weight: bold; 
+                                margin-bottom: 5px;
+                            }}
+                            .header-sub {{ 
+                                font-size: 10pt; 
+                                color: #555; 
                             }}
                             
-                            /* 하나의 문제가 쪼개지지 않도록 방어 */
+                            .two-column-layout {{
+                                column-count: 2;
+                                column-gap: 30px;
+                            }}
+                            
+                            /* 💥 수정 2: 문제 및 지문 양쪽 정렬(justify) 적용 */
                             .question-block {{ 
                                 break-inside: avoid; 
                                 page-break-inside: avoid; 
                                 margin-bottom: 35px; 
+                                text-align: justify; /* 양쪽 끝 맞춤 */
+                                word-break: keep-all; /* 단어 단위 줄바꿈 */
                             }}
                             
-                            /* 지문 박스 디자인 */
                             .passage-box {{ 
-                                border: 1px solid #000; 
+                                border: 1.2px solid #000; 
                                 padding: 12px 15px; 
                                 margin: 10px 0; 
                                 background-color: #fff;
-                                border-radius: 2px;
+                                text-align: justify;
                             }}
                             
-                            /* 해설지 전용 페이지 분리 */
                             .answers-section {{ 
                                 break-before: page; 
                                 page-break-before: always; 
                                 margin-top: 50px; 
                             }}
                             .section-title {{ 
-                                font-size: 14pt; 
+                                font-size: 15pt; 
                                 font-weight: bold; 
                                 text-align: center; 
                                 border-bottom: 1px solid #000; 
                                 padding-bottom: 10px; 
                                 margin-bottom: 30px; 
                             }}
-                            .answer-block {{ margin-bottom: 20px; }}
+                            .answer-block {{ margin-bottom: 20px; text-align: justify; word-break: keep-all; }}
                             
-                            /* 인쇄할 때 페이지 여백 설정 */
                             @media print {{
-                                @page {{ margin: 15mm 15mm; }}
+                                @page {{ margin: 15mm; }}
                                 body {{ padding: 0; }}
                             }}
                         </style>
                     </head>
                     <body>
-                        <!-- 시험지 헤더 -->
                         <div class="header-container">
                             <div class="header-title">에스디에이치어학원 {header_title}</div>
                             <div class="header-sub">SDH Premium Decoding & Internal Exam System</div>
                         </div>
                         
-                        <!-- 2단으로 쪼개지는 시험지 본문 -->
                         <div class="two-column-layout">
                             {questions_html}
                         </div>
                         
-                        <!-- 여기서부터 새로운 페이지(해설지) 강제 시작 -->
                         <div class="answers-section">
                             {answers_html}
                         </div>
@@ -274,8 +258,7 @@ I am <u>pleased</u> to invite you.
                     </html>
                     '''
                     
-                    st.success("✅ 오류 0% 완벽한 웹 문서가 준비되었습니다! 다운로드 후 실행하여 '인쇄(Ctrl+P)'를 눌러주세요.")
-                    # 브라우저 전용 html 파일로 제공
+                    st.success("✅ 가운데 정렬 및 양쪽 맞춤이 완벽히 적용되었습니다!")
                     st.download_button("📥 인쇄용 웹 문서(HTML) 다운로드", data=html_content, file_name="SDH_실전모의고사_인쇄용.html", mime="text/html")
                 except Exception as e:
                     st.error(f"오류가 발생했습니다: {e}")
