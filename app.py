@@ -11,13 +11,10 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 from io import BytesIO
 
 # ==========================================
-# 페이지 기본 설정 (Wide 모드)
+# 페이지 기본 설정
 # ==========================================
 st.set_page_config(page_title="SDH ACADEMY 통합 출제 플랫폼", layout="wide")
 
-# ==========================================
-# 🎨 커스텀 CSS
-# ==========================================
 st.markdown("""
 <style>
     .group-header { font-weight: 700; font-size: 1.1rem; color: #2C3E50; border-bottom: 2px solid #3498DB; padding-bottom: 8px; margin-top: 20px; margin-bottom: 15px; }
@@ -32,12 +29,9 @@ st.markdown("""
 # ==========================================
 def create_word_file(problems_list, header_title):
     doc = docx.Document()
-    
     for section in doc.sections:
-        section.top_margin = Inches(0.5)
-        section.bottom_margin = Inches(0.5)
-        section.left_margin = Inches(0.6)
-        section.right_margin = Inches(0.6)
+        section.top_margin = Inches(0.5); section.bottom_margin = Inches(0.5)
+        section.left_margin = Inches(0.6); section.right_margin = Inches(0.6)
 
     title = doc.add_heading(header_title, level=1)
     title.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -54,21 +48,16 @@ def create_word_file(problems_list, header_title):
             try:
                 inserted_box = passage_raw.split("[박스]")[1].split("[/박스]")[0]
                 main_passage = passage_raw.split("[/박스]")[1].strip()
-
                 p_box = doc.add_paragraph()
                 p_box.add_run(f"[{inserted_box}]").italic = True
                 p_box.paragraph_format.left_indent = Inches(0.2)
                 p_box.paragraph_format.right_indent = Inches(0.2)
-
                 doc.add_paragraph(main_passage)
-            except:
-                doc.add_paragraph(passage_raw)
-        else:
-            doc.add_paragraph(passage_raw)
+            except: doc.add_paragraph(passage_raw)
+        else: doc.add_paragraph(passage_raw)
 
         options = data.get("options", [])
-        if options:
-            doc.add_paragraph("  ".join(options))
+        if options: doc.add_paragraph("  ".join(options))
         doc.add_paragraph("")
 
     doc.add_page_break()
@@ -85,7 +74,48 @@ def create_word_file(problems_list, header_title):
     return buffer
 
 # ==========================================
-# 로컬 영구 DB 및 스마트 캐시 연동
+# 💥 2중 검증 엔진 (Python 규칙 검사 + AI 논리 검수)
+# ==========================================
+def rule_based_check(task_type, prob_data):
+    """1단계: 파이썬 기계적 필터링"""
+    required_keys = ["question", "passage", "options", "answer", "explanation"]
+    if not all(k in prob_data for k in required_keys):
+        return False, "JSON 구조 결함"
+    
+    passage = prob_data.get("passage", "")
+    if task_type in ["어법 추론", "어휘 추론"] and "①" not in passage:
+        return False, "지문 내 원문자(①) 누락"
+    if task_type == "문장 삽입" and "[박스]" not in passage:
+        return False, "주어진 문장 [박스] 누락"
+    if task_type == "글의 순서" and len(prob_data.get("options", [])) < 3:
+        return False, "순서 배열 선택지 부족"
+    
+    return True, "통과"
+
+def ai_cross_validation(prob_data, model):
+    """2단계: AI 교차 검수관"""
+    prompt = f"""당신은 엄격한 영어 모의고사 최종 검수관입니다.
+아래 출제된 문제를 직접 풀어보고, 정답이 논리적으로 도출되는지, 문제에 오류가 없는지 평가하세요.
+[문제] {prob_data.get('question')}
+[지문] {prob_data.get('passage')}
+[선택지] {prob_data.get('options')}
+[제시된 정답] {prob_data.get('answer')}
+[해설] {prob_data.get('explanation')}
+
+평가 결과 문제에 치명적 논리 오류나 억지가 있다면 is_valid를 false로, 완벽하다면 true로 반환하세요.
+오직 아래의 순수 JSON 형식만 출력하세요. (마크다운 금지)
+{{"is_valid": true, "reason": "검수 의견"}}
+"""
+    try:
+        res = model.generate_content(prompt)
+        raw = res.text.strip().replace("```json", "").replace("```", "").strip()
+        result = json.loads(raw)
+        return result.get("is_valid", False), result.get("reason", "검수관 응답 오류")
+    except:
+        return False, "AI 검수관 시스템 오류"
+
+# ==========================================
+# DB 및 세션 관리
 # ==========================================
 DB_FILE = "sdh_passages_db.json"
 CACHE_FILE = "sdh_problems_cache_db.json"
@@ -96,15 +126,10 @@ def load_json(filepath):
     return {}
 
 def save_json(filepath, data):
-    with open(filepath, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=4)
+    with open(filepath, "w", encoding="utf-8") as f: json.dump(data, f, ensure_ascii=False, indent=4)
 
 if 'passage_db' not in st.session_state: st.session_state.passage_db = load_json(DB_FILE)
 if 'problem_cache' not in st.session_state: st.session_state.problem_cache = load_json(CACHE_FILE)
-
-# ==========================================
-# 세션 상태 관리
-# ==========================================
 if 'exam_queue' not in st.session_state: st.session_state.exam_queue = []
 if 'generated_files' not in st.session_state: st.session_state.generated_files = []
 if 'part_counter' not in st.session_state: st.session_state.part_counter = 1
@@ -154,7 +179,6 @@ with tab_db:
                     q_reader = PyPDF2.PdfReader(uploaded_q_pdf)
                     raw_q_text = "".join([page.extract_text() + "\n" for page in q_reader.pages])
                     raw_a_text = "".join([page.extract_text() + "\n" for page in PyPDF2.PdfReader(uploaded_a_pdf).pages]) if uploaded_a_pdf else "정답지 없음."
-                        
                     prompt = f"""고등학교 영어 지문 복원 전문가로서, 아래 텍스트에서 18~45번 지문을 복원해 JSON 형태로 출력하세요. 발문과 선택지는 지우고, 빈칸과 어법 오류는 정답을 반영해 완벽한 원문으로 만드세요. 밑줄과 번호 기호도 모두 삭제하세요.\n[문제지]\n{raw_q_text}\n\n[정답지]\n{raw_a_text}"""
                     response = genai.GenerativeModel('gemini-3.6-flash').generate_content(prompt)
                     res_text = response.text.strip().replace("```json", "").replace("```", "").strip()
@@ -191,7 +215,7 @@ with tab_exam:
     st.markdown("---")
     split_size = st.number_input("파일 1개당 출제할 문제 수 (기본: 150)", min_value=10, max_value=500, value=150, step=10)
     
-    if st.button("🛒 1단계: 출제 대기열(Queue) 생성하기", type="secondary", use_container_width=True):
+    if st.button("🛒 1단계: 출제 대기열 생성하기", type="secondary", use_container_width=True):
         selected_q_nums = [f"{num}번" for num in range(18, 46) if st.session_state.get(f"q_{num}")]
         selected_types_list = []
         if t_topic: selected_types_list.append("주제 추론")
@@ -233,91 +257,115 @@ with tab_exam:
                 dl_col1, dl_col2 = st.columns(2)
                 with dl_col1:
                     st.download_button(
-                        label=f"🌐 Part {file_info['part']} 인쇄용 HTML 다운로드", 
-                        data=file_info['html'], 
-                        file_name=f"SDH_Premium_Part_{file_info['part']}.html", 
-                        mime="text/html",
-                        key=f"dl_html_{file_info['part']}",
-                        use_container_width=True
+                        label=f"🌐 Part {file_info['part']} 인쇄용 HTML 다운로드", data=file_info['html'], 
+                        file_name=f"SDH_Premium_Part_{file_info['part']}.html", mime="text/html",
+                        key=f"dl_html_{file_info['part']}", use_container_width=True
                     )
                 with dl_col2:
                     st.download_button(
-                        label=f"📝 Part {file_info['part']} 편집용 Word 다운로드", 
-                        data=file_info['word'], 
+                        label=f"📝 Part {file_info['part']} 편집용 Word 다운로드", data=file_info['word'], 
                         file_name=f"SDH_Premium_Part_{file_info['part']}.docx", 
                         mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                        key=f"dl_word_{file_info['part']}",
-                        use_container_width=True
+                        key=f"dl_word_{file_info['part']}", use_container_width=True
                     )
             st.markdown("---")
         
         if remain_tasks > 0:
             target_amount = min(split_size, remain_tasks)
-            if st.button(f"🚀 2단계: Part {st.session_state.part_counter} 출제 시작 ({target_amount}문제)", type="primary", use_container_width=True):
+            if st.button(f"🚀 2단계: Part {st.session_state.part_counter} 출제 및 2중 검증 시작", type="primary", use_container_width=True):
                 
                 current_batch = st.session_state.exam_queue[:target_amount]
                 exam_key = f"{exam_year}_{exam_month}_{exam_grade}"
                 
                 cached_results = {}
-                tasks_to_generate = []
+                tasks_to_process = []
+                retry_counts = {}
                 
                 for task in current_batch:
                     cache_key = f"{exam_key}_{task['q_num']}_{task['q_type']}"
+                    retry_counts[cache_key] = 0
                     if cache_key in st.session_state.problem_cache:
                         cached_results[cache_key] = st.session_state.problem_cache[cache_key]
                     else:
-                        tasks_to_generate.append(task)
+                        tasks_to_process.append(task)
                 
                 progress_bar = st.progress(0)
                 status_text = st.empty()
                 model = genai.GenerativeModel('gemini-3.6-flash')
                 
-                if tasks_to_generate:
-                    chunk_size = 3 
-                    total_chunks = (len(tasks_to_generate) + chunk_size - 1) // chunk_size
+                # 💥 큐(Queue) 기반 재시도 엔진 가동
+                total_initial_tasks = len(tasks_to_process)
+                processed_count = 0
+                
+                while tasks_to_process:
+                    chunk = tasks_to_process[:3]
+                    tasks_to_process = tasks_to_process[3:]
                     
-                    for i in range(0, len(tasks_to_generate), chunk_size):
-                        chunk = tasks_to_generate[i:i + chunk_size]
-                        current_chunk_idx = (i // chunk_size) + 1
-                        status_text.text(f"🏃 Part {st.session_state.part_counter} AI 생성 중... (총 {total_chunks}구간 중 {current_chunk_idx}구간 진행)")
+                    status_text.text(f"🏃 2중 검증 출제 중... (잔여 대기열: {len(tasks_to_process)}문제)")
+                    
+                    prompt = "당신은 고등학교 내신 영어 출제 전문가입니다. 다음 [출제 목록]에 맞게 출제하세요.\n\n"
+                    for idx, task in enumerate(chunk):
+                        passage_text = st.session_state.passage_db[exam_key][task['q_num']]
+                        prompt += f"요청 {idx+1}. 지문: {task['q_num']}, 유형: {task['q_type']}\n원문: {passage_text}\n\n"
+                    prompt += """[출력 규칙] 오직 순수 JSON 배열만 출력. "question", "passage", "options", "answer", "explanation" 포함. 글의 순서는 options에 (A)-(C)-(B) 포함. 어법/어휘 등 지문 내 번호 포함 시 options는 []. 서술형 조건은 passage 맨 밑에 추가. 문장 삽입은 맨 앞에 [박스]주어진문장[/박스] 표기."""
+                    
+                    try:
+                        response = model.generate_content(prompt)
+                        raw_text = response.text.strip().replace("```json", "").replace("```", "").strip()
+                        chunk_problems = json.loads(raw_text)
                         
-                        prompt = "당신은 고등학교 내신 영어 출제 전문가입니다. 다음 지시된 [출제 목록]에 맞게 문제를 출제하세요.\n\n[출제 목록]\n"
                         for idx, task in enumerate(chunk):
-                            passage_text = st.session_state.passage_db[exam_key][task['q_num']]
-                            prompt += f"요청 {idx+1}. 지문 번호: {task['q_num']}, 출제해야 할 문제 유형: {task['q_type']}\n원문: {passage_text}\n\n"
-                            
-                        prompt += """[💥 디테일 출력 규칙 - 매우 엄격함 💥]
-1. 부연 설명이나 마크다운(```json 등) 없이 순수 JSON 배열만 출력하세요.
-2. 키: "question", "passage", "options", "answer", "explanation"
-3. 글의 순서 문제: options에 반드시 ['① (A) - (C) - (B)', '② (B) - (A) - (C)', ...] 형태로 원문자 기호를 포함하세요.
-4. 어법/어휘/문장삽입 문제: 지문(passage) 안에 밑줄이나 번호(①, ②)가 이미 포함된 경우, options는 반드시 빈 리스트 [] 를 반환하여 중복을 방지하세요.
-5. 서술형 영작 문제: <조건> 텍스트는 발문(question)에 넣지 말고, 지문(passage) 텍스트 맨 마지막에 줄바꿈(<br/><br/>) 후 추가하세요.
-6. 문장 삽입 문제: 주어진 문장은 반드시 [박스]주어진 문장[/박스] 형태로 지문 맨 앞에 표기하세요.
-"""
-                        try:
-                            response = model.generate_content(prompt)
-                            raw_text = response.text.strip().replace("```json", "").replace("```", "").strip()
-                            chunk_problems = json.loads(raw_text)
-                            
-                            for idx, task in enumerate(chunk):
-                                if idx < len(chunk_problems):
-                                    cache_key = f"{exam_key}_{task['q_num']}_{task['q_type']}"
-                                    st.session_state.problem_cache[cache_key] = chunk_problems[idx]
-                                    cached_results[cache_key] = chunk_problems[idx]
-                        except Exception as e:
-                            time.sleep(1)
-                            
-                        progress_bar.progress(current_chunk_idx / total_chunks)
+                            if idx < len(chunk_problems):
+                                prob = chunk_problems[idx]
+                                cache_key = f"{exam_key}_{task['q_num']}_{task['q_type']}"
+                                
+                                # 1차: 파이썬 필터링
+                                rule_ok, rule_msg = rule_based_check(task['q_type'], prob)
+                                
+                                # 2차: AI 교차 검수 (파이썬 통과 시에만)
+                                ai_ok = False
+                                if rule_ok:
+                                    ai_ok, ai_msg = ai_cross_validation(prob, model)
+                                
+                                if rule_ok and ai_ok:
+                                    # 검증 완벽 통과 -> 캐시 저장
+                                    st.session_state.problem_cache[cache_key] = prob
+                                    cached_results[cache_key] = prob
+                                    processed_count += 1
+                                else:
+                                    # 검증 실패 처리
+                                    if retry_counts[cache_key] < 2:
+                                        retry_counts[cache_key] += 1
+                                        tasks_to_process.append(task) # 대기열 뒤로 다시 삽입
+                                    else:
+                                        # 2번 재시도 후에도 실패하면 경고 꼬리표 달고 강제 통과
+                                        prob['question'] = f"[⚠️검수 실패] {prob.get('question', '')}"
+                                        st.session_state.problem_cache[cache_key] = prob
+                                        cached_results[cache_key] = prob
+                                        processed_count += 1
+                                        
+                    except Exception as e:
+                        time.sleep(1)
+                        # JSON 파싱 실패 시 청크 전체 재시도
+                        for task in chunk:
+                            cache_key = f"{exam_key}_{task['q_num']}_{task['q_type']}"
+                            if retry_counts[cache_key] < 2:
+                                retry_counts[cache_key] += 1
+                                tasks_to_process.append(task)
+                            else:
+                                dummy_prob = {"question": "[⚠️에러 발생] 수동 출제 요망", "passage": "", "options": [], "answer": "1", "explanation": "시스템 장애"}
+                                st.session_state.problem_cache[cache_key] = dummy_prob
+                                cached_results[cache_key] = dummy_prob
+                                processed_count += 1
                     
-                    save_json(CACHE_FILE, st.session_state.problem_cache)
+                    if total_initial_tasks > 0:
+                        progress = min(1.0, processed_count / total_initial_tasks)
+                        progress_bar.progress(progress)
                 
-                status_text.text(f"✅ Part {st.session_state.part_counter} 출제 완료! 시험지 렌더링 중...")
+                save_json(CACHE_FILE, st.session_state.problem_cache)
+                status_text.text(f"✅ Part {st.session_state.part_counter} 2중 검증 및 출제 완료! 렌더링 중...")
                 
-                all_generated_problems = []
-                for task in current_batch:
-                    cache_key = f"{exam_key}_{task['q_num']}_{task['q_type']}"
-                    if cache_key in cached_results:
-                        all_generated_problems.append(cached_results[cache_key])
+                all_generated_problems = [cached_results[f"{exam_key}_{task['q_num']}_{task['q_type']}"] for task in current_batch if f"{exam_key}_{task['q_num']}_{task['q_type']}" in cached_results]
                 
                 questions_html = ""
                 answers_html = ""
@@ -325,13 +373,11 @@ with tab_exam:
                 for idx, data in enumerate(all_generated_problems):
                     q_title = f"{idx+1}. {data.get('question', '문제 누락').split('.', 1)[-1].strip() if '.' in data.get('question', '') else data.get('question', '')}"
                     passage_raw = data.get("passage", "")
-                    
                     if "[박스]" in passage_raw and "[/박스]" in passage_raw:
                         inserted_box = passage_raw.split("[박스]")[1].split("[/박스]")[0]
                         main_passage = passage_raw.split("[/박스]")[1].strip()
                         passage_html = f'<div class="inserted-box">{inserted_box}</div><div class="passage-box">{main_passage}</div>'
-                    else:
-                        passage_html = f'<div class="passage-box">{passage_raw}</div>'
+                    else: passage_html = f'<div class="passage-box">{passage_raw}</div>'
                     
                     options_html = ""
                     options = data.get("options", [])
@@ -345,12 +391,11 @@ with tab_exam:
 
                 header_title = f"{exam_year} {exam_month} {exam_grade} 모의고사 변형문제 (Part {st.session_state.part_counter})"
                 
-                # 💥 3. CSS 초정밀 튜닝: 양쪽 정렬(justify) 적용 및 단어 찢어짐 방지(word-break: normal)
                 html_content = f'''
                 <!DOCTYPE html><html lang="ko"><head><meta charset="utf-8"><title>{header_title}</title>
                 <style>
-                    @import url('[https://fonts.googleapis.com/css2?family=Nanum+Myeongjo:wght@400;700&display=swap](https://fonts.googleapis.com/css2?family=Nanum+Myeongjo:wght@400;700&display=swap)');
-                    @import url('[https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@700&display=swap](https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@700&display=swap)');
+                    @import url('https://fonts.googleapis.com/css2?family=Nanum+Myeongjo:wght@400;700&display=swap');
+                    @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@700&display=swap');
                     body {{ font-family: 'Nanum Myeongjo', serif; font-size: 9.8pt; letter-spacing: -0.3px; line-height: 1.35; color: #000; max-width: 210mm; margin: 0 auto; padding: 20px; }}
                     .header-container {{ font-family: 'Noto Sans KR', sans-serif; display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 2px solid #000; padding-bottom: 8px; margin-bottom: 20px; }}
                     .header-title {{ font-size: 14pt; font-weight: bold; }}
@@ -358,11 +403,8 @@ with tab_exam:
                     .two-column-layout {{ column-count: 2; column-gap: 25px; column-fill: auto; }}
                     .question-block {{ break-inside: avoid; page-break-inside: avoid; margin-bottom: 30px; text-align: left; word-break: keep-all; }}
                     .question-title {{ font-family: 'Noto Sans KR', sans-serif; font-size: 10.5pt; font-weight: bold; margin-bottom: 5px; }}
-                    
-                    /* 💥 핵심: 양쪽 정렬(justify) 유지하되 영문 띄어쓰기 보호(word-break: normal) */
                     .passage-box {{ border: 1.2px solid #000; padding: 8px 10px; margin: 5px 0; background-color: #fff; text-align: justify; word-break: normal; overflow-wrap: break-word; }}
                     .inserted-box {{ border: 1.5px solid #555; padding: 7px; margin-bottom: 8px; text-align: justify; word-break: normal; background-color: #f9f9f9; }}
-                    
                     .options-container {{ margin-top: 8px; }} .option-item {{ display: inline-block; margin-right: 15px; margin-bottom: 4px; }}
                     .answers-section {{ break-before: page; page-break-before: always; margin-top: 30px; }}
                     .section-title {{ font-family: 'Noto Sans KR', sans-serif; font-size: 13pt; font-weight: bold; text-align: center; border-bottom: 1px solid #000; padding-bottom: 8px; margin-bottom: 20px; }}
@@ -390,8 +432,5 @@ with tab_exam:
         else:
             st.success("🎉 모든 대기열의 문제가 출제 완료되었습니다!")
 
-# ==========================================
-# 하단 푸터
-# ==========================================
 st.markdown("---")
 st.markdown("<div style='text-align: center; color: gray; font-size: 12px;'>SDH ACADEMY & Internal Exam System</div>", unsafe_allow_html=True)
