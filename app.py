@@ -3,7 +3,7 @@ import pandas as pd
 import google.generativeai as genai
 import json
 import os
-import PyPDF2  # PDF 처리를 위한 라이브러리 추가
+import PyPDF2
 
 # ==========================================
 # 페이지 기본 설정 (Wide 모드)
@@ -99,7 +99,7 @@ with tab_search:
     st.dataframe(pd.DataFrame(db_data), use_container_width=True, hide_index=True)
 
 # ------------------------------------------
-# 탭 2: 지문 DB 관리 (PDF 자동 추출 기능 추가)
+# 탭 2: 지문 DB 관리 (PDF 자동 정답 융합 추출)
 # ------------------------------------------
 with tab_db:
     st.markdown(f"##### 🗂️ 현재 선택된 출제 대상: **{exam_year} {exam_month}, {exam_grade}**")
@@ -109,34 +109,53 @@ with tab_db:
         st.session_state.passage_db[exam_key] = {}
 
     st.markdown("---")
-    # 💥 기능 1: PDF 인공지능 자동 추출
-    st.markdown("### 🚀 [추천] 방법 1. PDF 파일로 한 번에 자동 등록하기")
-    st.info("평가원이나 교육청의 모의고사 PDF 파일을 업로드하면, AI가 18번~45번 지문만 쏙쏙 뽑아 DB에 자동 저장합니다.")
+    # 💥 기능 1: 문제 + 정답 PDF 동시 업로드 및 AI 융합 추출
+    st.markdown("### 🚀 방법 1. 문제지 & 정답지 PDF 동시 업로드 (AI 정답 자동 반영)")
+    st.info("문제지와 정답지 PDF를 함께 올리면, AI가 정답을 파악하여 빈칸을 채우고 밑줄과 번호를 모두 지운 '완벽한 원문'을 복원합니다.")
     
-    uploaded_pdf = st.file_uploader("PDF 파일 업로드", type=["pdf"])
+    pdf_col1, pdf_col2 = st.columns(2)
+    with pdf_col1:
+        uploaded_q_pdf = st.file_uploader("📝 문제지 PDF 업로드", type=["pdf"])
+    with pdf_col2:
+        uploaded_a_pdf = st.file_uploader("💡 정답/해설지 PDF 업로드 (선택)", type=["pdf"])
     
-    if uploaded_pdf is not None:
-        if st.button("✨ AI 자동 추출 및 DB 전체 저장", type="primary"):
-            with st.spinner("AI가 PDF를 읽고 불필요한 선택지를 버린 뒤, 순수 지문만 추출하고 있습니다. (약 30~60초 소요)"):
+    if uploaded_q_pdf is not None:
+        if st.button("✨ AI 정답 반영 지문 추출 및 DB 저장", type="primary", use_container_width=True):
+            with st.spinner("AI가 문제를 분석하고 정답을 융합하여 순수 원문을 복원 중입니다... (약 1분 소요)"):
                 try:
-                    # PDF 텍스트 추출
-                    pdf_reader = PyPDF2.PdfReader(uploaded_pdf)
-                    raw_text = ""
-                    for page in pdf_reader.pages:
-                        raw_text += page.extract_text() + "\n"
+                    # 문제지 텍스트 추출
+                    q_reader = PyPDF2.PdfReader(uploaded_q_pdf)
+                    raw_q_text = ""
+                    for page in q_reader.pages:
+                        raw_q_text += page.extract_text() + "\n"
                         
-                    # Gemini에게 지문 발췌 명령
-                    prompt = f'''다음은 고등학교 영어 모의고사 PDF에서 추출한 거친 텍스트(Raw Text)입니다.
-이 텍스트를 분석하여 18번부터 45번까지의 '영어 지문(Passage) 원문'만 정확하게 발췌한 뒤, JSON 형태로 출력해 주세요.
+                    # 정답지 텍스트 추출
+                    raw_a_text = ""
+                    if uploaded_a_pdf is not None:
+                        a_reader = PyPDF2.PdfReader(uploaded_a_pdf)
+                        for page in a_reader.pages:
+                            raw_a_text += page.extract_text() + "\n"
+                    else:
+                        raw_a_text = "정답지가 제공되지 않았습니다. 문맥을 파악하여 최선을 다해 원문을 복원하세요."
+                        
+                    # Gemini에게 지문 복원 및 정답 융합 명령
+                    prompt = f'''당신은 고등학교 영어 지문 복원 전문가입니다.
+제공된 [문제지 PDF 텍스트]와 [정답/해설지 PDF 텍스트]를 분석하여 18번부터 45번까지의 지문을 완벽한 '원본 텍스트'로 복원한 뒤, JSON 형태로 출력해 주세요.
 
-[추출 규칙 - 매우 엄격함]
-1. 문제 발문("다음 글의 목적으로...", "빈칸에 들어갈 말로...")과 하단 선택지(①, ②...)는 절대 포함하지 마세요. 오직 영어 지문 본문만 추출하세요.
-2. 어법/어휘 문제에 있는 밑줄이나 번호(①, ②)는 원문 그대로 유지하세요.
-3. JSON 키(Key)는 반드시 "18번", "19번", ... "45번" 형식이어야 합니다. 텍스트가 없는 번호는 건너뛰세요.
-4. 어떠한 인사말이나 마크다운(```json) 없이 완벽한 JSON 형식만 출력하세요.
+[지문 복원 및 정답 반영 규칙 - 매우 엄격함]
+1. 문제 발문("다음 글의 목적으로...", "빈칸에 들어갈 말로...")과 하단 선택지(①, ②...)는 절대 포함하지 마세요.
+2. 빈칸 추론 문제: 정답/해설지를 참고하여 빈칸 자리에 알맞은 단어나 구를 자연스럽게 채워 넣고, 빈칸 기호(____)는 삭제하세요.
+3. 어법/어휘 문제: 정답 해설을 참고하여 틀린 단어를 올바른 단어로 고치고, 모든 밑줄과 원문자(①, ②, ③, ④, ⑤) 기호를 삭제하세요.
+4. 문장 삽입/글의 순서 문제: 정답을 반영하여 문장들을 올바른 순서대로 자연스럽게 이어붙이고, 삽입 기호나 순서 기호(A, B, C)를 삭제하세요.
+5. 결과물은 단 하나의 불필요한 기호(밑줄, 번호 등)도 없는 '매끄럽고 완벽한 영문 단락'이어야 합니다.
+6. JSON 키(Key)는 반드시 "18번", "19번", ... "45번" 형식이어야 합니다. 텍스트가 없는 번호는 건너뛰세요.
+7. 어떠한 인사말이나 마크다운(```json) 없이 완벽한 JSON 형식만 출력하세요.
 
-[원문 텍스트]
-{raw_text}
+[문제지 텍스트]
+{raw_q_text}
+
+[정답/해설지 텍스트]
+{raw_a_text}
 '''
                     model = genai.GenerativeModel('gemini-3.6-flash')
                     response = model.generate_content(prompt)
@@ -154,32 +173,32 @@ with tab_db:
                         st.session_state.passage_db[exam_key][q_num] = passage
                     save_db(st.session_state.passage_db)
                     
-                    st.success(f"🎉 성공! 총 {len(extracted_data)}개의 지문이 완벽하게 추출되어 DB에 저장되었습니다.")
+                    st.success(f"🎉 성공! 총 {len(extracted_data)}개의 지문이 완벽한 원문으로 복원되어 DB에 저장되었습니다.")
                 except Exception as e:
                     st.error(f"자동 추출 중 오류가 발생했습니다: {e}")
 
     st.markdown("---")
     
     # 기능 2: 수동 개별 등록 (기존)
-    st.markdown("### ✍️ 방법 2. 개별 수동 등록 및 수정")
+    st.markdown("### ✍️ 방법 2. 개별 수동 등록 및 검수")
     db_col1, db_col2 = st.columns([1, 2.5])
     with db_col1:
-        target_q = st.selectbox("수정/등록할 지문 번호", [f"{q}번" for q in range(18, 46)])
+        target_q = st.selectbox("수정/검수할 지문 번호", [f"{q}번" for q in range(18, 46)])
         existing_text = st.session_state.passage_db[exam_key].get(target_q, "")
         if existing_text:
-            st.success("✅ 현재 DB에 등록된 지문이 있습니다.")
+            st.success("✅ 현재 DB에 복원된 지문이 있습니다.")
         else:
             st.warning("❌ 등록된 지문이 없습니다.")
             
     with db_col2:
-        new_passage_text = st.text_area(f"{target_q} 지문 원문", value=existing_text, height=250)
+        new_passage_text = st.text_area(f"{target_q} 지문 원문 (수동 수정 가능)", value=existing_text, height=250)
         if st.button("💾 개별 지문 수정/저장"):
             if new_passage_text.strip() == "":
                 st.error("지문 내용을 입력해주세요.")
             else:
                 st.session_state.passage_db[exam_key][target_q] = new_passage_text.strip()
                 save_db(st.session_state.passage_db)
-                st.success(f"{target_q} 지문이 성공적으로 저장되었습니다!")
+                st.success(f"{target_q} 지문이 성공적으로 수정되었습니다!")
 
 # ------------------------------------------
 # 탭 3: 세부 변형문제 제작
