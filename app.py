@@ -9,6 +9,7 @@ import docx
 from docx.shared import Pt, Inches
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from io import BytesIO
+import concurrent.futures  # 💥 초고속 멀티 스레딩을 위한 핵심 부품!
 
 # ==========================================
 # 페이지 기본 설정
@@ -74,45 +75,56 @@ def create_word_file(problems_list, header_title):
     return buffer
 
 # ==========================================
-# 💥 2중 검증 엔진 (Python 규칙 검사 + AI 논리 검수)
+# 💥 파이썬 1차 기계적 필터링 규칙
 # ==========================================
 def rule_based_check(task_type, prob_data):
-    """1단계: 파이썬 기계적 필터링"""
     required_keys = ["question", "passage", "options", "answer", "explanation"]
-    if not all(k in prob_data for k in required_keys):
-        return False, "JSON 구조 결함"
-    
+    if not all(k in prob_data for k in required_keys): return False, "JSON 결함"
     passage = prob_data.get("passage", "")
-    if task_type in ["어법 추론", "어휘 추론"] and "①" not in passage:
-        return False, "지문 내 원문자(①) 누락"
-    if task_type == "문장 삽입" and "[박스]" not in passage:
-        return False, "주어진 문장 [박스] 누락"
-    if task_type == "글의 순서" and len(prob_data.get("options", [])) < 3:
-        return False, "순서 배열 선택지 부족"
-    
+    if task_type in ["어법 추론", "어휘 추론"] and "①" not in passage: return False, "지문 내 원문자(①) 누락"
+    if task_type == "문장 삽입" and "[박스]" not in passage: return False, "주어진 문장 [박스] 누락"
+    if task_type == "글의 순서" and len(prob_data.get("options", [])) < 3: return False, "순서 배열 선택지 부족"
     return True, "통과"
 
-def ai_cross_validation(prob_data, model):
-    """2단계: AI 교차 검수관"""
-    prompt = f"""당신은 엄격한 영어 모의고사 최종 검수관입니다.
-아래 출제된 문제를 직접 풀어보고, 정답이 논리적으로 도출되는지, 문제에 오류가 없는지 평가하세요.
-[문제] {prob_data.get('question')}
-[지문] {prob_data.get('passage')}
-[선택지] {prob_data.get('options')}
-[제시된 정답] {prob_data.get('answer')}
-[해설] {prob_data.get('explanation')}
+# ==========================================
+# 💥 병렬 처리용 '초고속 청크 생성' 함수
+# ==========================================
+def process_chunk(chunk, exam_key, passage_db, model):
+    prompt = "당신은 고등학교 내신 영어 출제 전문가입니다. 다음 [출제 목록]에 맞게 출제하세요.\n\n"
+    for idx, task in enumerate(chunk):
+        passage_text = passage_db[exam_key][task['q_num']]
+        prompt += f"요청 {idx+1}. 지문: {task['q_num']}, 유형: {task['q_type']}\n원문: {passage_text}\n\n"
+    
+    # 💥 자가 검증(Self-Correction)이 압축된 궁극의 프롬프트
+    prompt += """[💥 출력 규칙 및 자가 검수 💥]
+1. 오직 순수 JSON 배열만 출력하세요. (마크다운 ```json 금지)
+2. 키: "question", "passage", "options", "answer", "explanation" 포함.
+3. 글의 순서 문제: options에 ['① (A)-(C)-(B)', ...] 포함.
+4. 어법/어휘 문제: 지문(passage) 안에 밑줄이나 번호(①, ②)가 이미 포함된 경우, options는 반드시 빈 리스트 [] 반환.
+5. 서술형 문제: <조건> 텍스트는 passage 맨 밑에 추가.
+6. 문장 삽입 문제: 맨 앞에 [박스]주어진문장[/박스] 표기.
+[필수] 답변을 출력하기 직전, 위 6가지 규칙을 모두 완벽하게 지켰는지 스스로 검증한 후 결과물만 반환하세요."""
 
-평가 결과 문제에 치명적 논리 오류나 억지가 있다면 is_valid를 false로, 완벽하다면 true로 반환하세요.
-오직 아래의 순수 JSON 형식만 출력하세요. (마크다운 금지)
-{{"is_valid": true, "reason": "검수 의견"}}
-"""
-    try:
-        res = model.generate_content(prompt)
-        raw = res.text.strip().replace("```json", "").replace("```", "").strip()
-        result = json.loads(raw)
-        return result.get("is_valid", False), result.get("reason", "검수관 응답 오류")
-    except:
-        return False, "AI 검수관 시스템 오류"
+    for attempt in range(2): # 실패 시 1회 재시도 (총 2회)
+        try:
+            response = model.generate_content(prompt)
+            raw_text = response.text.strip().replace("```json", "").replace("```", "").strip()
+            probs = json.loads(raw_text)
+            
+            valid_probs = []
+            for idx, prob in enumerate(probs):
+                if idx < len(chunk):
+                    is_ok, msg = rule_based_check(chunk[idx]['q_type'], prob)
+                    if not is_ok:
+                        raise ValueError(msg) # 규칙 위반 시 즉시 에러 발생시켜 재시도 유도
+                    valid_probs.append(prob)
+            return chunk, valid_probs, True
+        except Exception as e:
+            time.sleep(1.5) # 과부하 방지 잠시 휴식
+    
+    # 2번 다 실패하면 에러 꼬리표 달아서 반환 (무한 루프 방지)
+    failed_probs = [{"question": "[⚠️검수 실패] 수동 확인 요망", "passage": "생성 오류", "options": [], "answer": "1", "explanation": "재시도 요망"} for _ in chunk]
+    return chunk, failed_probs, False
 
 # ==========================================
 # DB 및 세션 관리
@@ -272,18 +284,17 @@ with tab_exam:
         
         if remain_tasks > 0:
             target_amount = min(split_size, remain_tasks)
-            if st.button(f"🚀 2단계: Part {st.session_state.part_counter} 출제 및 2중 검증 시작", type="primary", use_container_width=True):
+            # 💥 초고속 출제 버튼
+            if st.button(f"🚀 2단계: Part {st.session_state.part_counter} 초고속 출제 시작 ({target_amount}문제)", type="primary", use_container_width=True):
                 
                 current_batch = st.session_state.exam_queue[:target_amount]
                 exam_key = f"{exam_year}_{exam_month}_{exam_grade}"
                 
                 cached_results = {}
                 tasks_to_process = []
-                retry_counts = {}
                 
                 for task in current_batch:
                     cache_key = f"{exam_key}_{task['q_num']}_{task['q_type']}"
-                    retry_counts[cache_key] = 0
                     if cache_key in st.session_state.problem_cache:
                         cached_results[cache_key] = st.session_state.problem_cache[cache_key]
                     else:
@@ -293,77 +304,33 @@ with tab_exam:
                 status_text = st.empty()
                 model = genai.GenerativeModel('gemini-3.6-flash')
                 
-                # 💥 큐(Queue) 기반 재시도 엔진 가동
-                total_initial_tasks = len(tasks_to_process)
-                processed_count = 0
-                
-                while tasks_to_process:
-                    chunk = tasks_to_process[:3]
-                    tasks_to_process = tasks_to_process[3:]
+                if tasks_to_process:
+                    chunk_size = 2 # 과부하 방지 및 속도 최적화를 위해 2문제씩 쪼갬
+                    chunks = [tasks_to_process[i:i + chunk_size] for i in range(0, len(tasks_to_process), chunk_size)]
+                    total_chunks = len(chunks)
+                    completed_chunks = 0
                     
-                    status_text.text(f"🏃 2중 검증 출제 중... (잔여 대기열: {len(tasks_to_process)}문제)")
-                    
-                    prompt = "당신은 고등학교 내신 영어 출제 전문가입니다. 다음 [출제 목록]에 맞게 출제하세요.\n\n"
-                    for idx, task in enumerate(chunk):
-                        passage_text = st.session_state.passage_db[exam_key][task['q_num']]
-                        prompt += f"요청 {idx+1}. 지문: {task['q_num']}, 유형: {task['q_type']}\n원문: {passage_text}\n\n"
-                    prompt += """[출력 규칙] 오직 순수 JSON 배열만 출력. "question", "passage", "options", "answer", "explanation" 포함. 글의 순서는 options에 (A)-(C)-(B) 포함. 어법/어휘 등 지문 내 번호 포함 시 options는 []. 서술형 조건은 passage 맨 밑에 추가. 문장 삽입은 맨 앞에 [박스]주어진문장[/박스] 표기."""
-                    
-                    try:
-                        response = model.generate_content(prompt)
-                        raw_text = response.text.strip().replace("```json", "").replace("```", "").strip()
-                        chunk_problems = json.loads(raw_text)
+                    # 💥 멀티 스레딩 엔진 가동 (AI 4명이 동시에 작업)
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+                        future_to_chunk = {executor.submit(process_chunk, c, exam_key, st.session_state.passage_db, model): c for c in chunks}
                         
-                        for idx, task in enumerate(chunk):
-                            if idx < len(chunk_problems):
-                                prob = chunk_problems[idx]
-                                cache_key = f"{exam_key}_{task['q_num']}_{task['q_type']}"
-                                
-                                # 1차: 파이썬 필터링
-                                rule_ok, rule_msg = rule_based_check(task['q_type'], prob)
-                                
-                                # 2차: AI 교차 검수 (파이썬 통과 시에만)
-                                ai_ok = False
-                                if rule_ok:
-                                    ai_ok, ai_msg = ai_cross_validation(prob, model)
-                                
-                                if rule_ok and ai_ok:
-                                    # 검증 완벽 통과 -> 캐시 저장
-                                    st.session_state.problem_cache[cache_key] = prob
-                                    cached_results[cache_key] = prob
-                                    processed_count += 1
-                                else:
-                                    # 검증 실패 처리
-                                    if retry_counts[cache_key] < 2:
-                                        retry_counts[cache_key] += 1
-                                        tasks_to_process.append(task) # 대기열 뒤로 다시 삽입
-                                    else:
-                                        # 2번 재시도 후에도 실패하면 경고 꼬리표 달고 강제 통과
-                                        prob['question'] = f"[⚠️검수 실패] {prob.get('question', '')}"
-                                        st.session_state.problem_cache[cache_key] = prob
-                                        cached_results[cache_key] = prob
-                                        processed_count += 1
-                                        
-                    except Exception as e:
-                        time.sleep(1)
-                        # JSON 파싱 실패 시 청크 전체 재시도
-                        for task in chunk:
-                            cache_key = f"{exam_key}_{task['q_num']}_{task['q_type']}"
-                            if retry_counts[cache_key] < 2:
-                                retry_counts[cache_key] += 1
-                                tasks_to_process.append(task)
-                            else:
-                                dummy_prob = {"question": "[⚠️에러 발생] 수동 출제 요망", "passage": "", "options": [], "answer": "1", "explanation": "시스템 장애"}
-                                st.session_state.problem_cache[cache_key] = dummy_prob
-                                cached_results[cache_key] = dummy_prob
-                                processed_count += 1
+                        for future in concurrent.futures.as_completed(future_to_chunk):
+                            chunk_info, probs, success = future.result()
+                            
+                            for idx, task in enumerate(chunk_info):
+                                if idx < len(probs):
+                                    cache_key = f"{exam_key}_{task['q_num']}_{task['q_type']}"
+                                    st.session_state.problem_cache[cache_key] = probs[idx]
+                                    cached_results[cache_key] = probs[idx]
+                                    
+                            completed_chunks += 1
+                            progress = min(1.0, completed_chunks / total_chunks)
+                            progress_bar.progress(progress)
+                            status_text.text(f"⚡ 초고속 병렬 출제 중... (총 {total_chunks}구간 중 {completed_chunks}구간 완료)")
                     
-                    if total_initial_tasks > 0:
-                        progress = min(1.0, processed_count / total_initial_tasks)
-                        progress_bar.progress(progress)
+                    save_json(CACHE_FILE, st.session_state.problem_cache)
                 
-                save_json(CACHE_FILE, st.session_state.problem_cache)
-                status_text.text(f"✅ Part {st.session_state.part_counter} 2중 검증 및 출제 완료! 렌더링 중...")
+                status_text.text(f"✅ Part {st.session_state.part_counter} 초고속 출제 완료! 렌더링 중...")
                 
                 all_generated_problems = [cached_results[f"{exam_key}_{task['q_num']}_{task['q_type']}"] for task in current_batch if f"{exam_key}_{task['q_num']}_{task['q_type']}" in cached_results]
                 
@@ -394,8 +361,8 @@ with tab_exam:
                 html_content = f'''
                 <!DOCTYPE html><html lang="ko"><head><meta charset="utf-8"><title>{header_title}</title>
                 <style>
-                    @import url('https://fonts.googleapis.com/css2?family=Nanum+Myeongjo:wght@400;700&display=swap');
-                    @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@700&display=swap');
+                    @import url('[https://fonts.googleapis.com/css2?family=Nanum+Myeongjo:wght@400;700&display=swap](https://fonts.googleapis.com/css2?family=Nanum+Myeongjo:wght@400;700&display=swap)');
+                    @import url('[https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@700&display=swap](https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@700&display=swap)');
                     body {{ font-family: 'Nanum Myeongjo', serif; font-size: 9.8pt; letter-spacing: -0.3px; line-height: 1.35; color: #000; max-width: 210mm; margin: 0 auto; padding: 20px; }}
                     .header-container {{ font-family: 'Noto Sans KR', sans-serif; display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 2px solid #000; padding-bottom: 8px; margin-bottom: 20px; }}
                     .header-title {{ font-size: 14pt; font-weight: bold; }}
