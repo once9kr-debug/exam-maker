@@ -4,6 +4,7 @@ import google.generativeai as genai
 import json
 import os
 import PyPDF2
+import time
 
 # ==========================================
 # 페이지 기본 설정 (Wide 모드)
@@ -55,7 +56,7 @@ if 'passage_db' not in st.session_state:
     st.session_state.passage_db = load_db()
 
 # ==========================================
-# 체크박스 전체선택 동기화 방아쇠(콜백) 함수
+# 체크박스 전체선택 동기화 방아쇠
 # ==========================================
 def toggle_all_types():
     keys = ["t_topic", "t_title", "t_purpose", "t_blank", "t_order", "t_insert", "t_imply", "t_grammar", "t_vocab", "t_essay", "t_match"]
@@ -106,7 +107,7 @@ with tab_search:
     st.dataframe(pd.DataFrame(db_data), use_container_width=True, hide_index=True)
 
 # ------------------------------------------
-# 탭 2: 지문 DB 관리 (PDF 정답 융합 추출)
+# 탭 2: 지문 DB 관리
 # ------------------------------------------
 with tab_db:
     st.markdown(f"##### 🗂️ 현재 선택된 출제 대상: **{exam_year} {exam_month}, {exam_grade}**")
@@ -154,7 +155,6 @@ with tab_db:
                     model = genai.GenerativeModel('gemini-3.6-flash')
                     response = model.generate_content(prompt)
                     
-                    # 💥 복사 오류 원천 차단: 안전한 문자열 교체 방식 사용
                     res_text = response.text.strip()
                     res_text = res_text.replace("```json", "").replace("```", "").strip()
                     
@@ -249,29 +249,44 @@ with tab_exam:
         if not selected_q_nums:
             st.warning("지문 번호를 1개 이상 선택해주세요.")
         else:
-            with st.spinner(f"각 지문마다 {len(selected_types_list)}개의 유형을 모두 출제 중입니다. (총 {len(selected_q_nums) * len(selected_types_list)}문제) ..."):
+            exam_key = f"{exam_year}_{exam_month}_{exam_grade}"
+            current_db = st.session_state.passage_db.get(exam_key, {})
+            
+            missing_passages = [q for q in selected_q_nums if q not in current_db or current_db[q].strip() == ""]
+            
+            if missing_passages:
+                st.error(f"🚨 다음 지문들이 DB에 등록되지 않았습니다: {', '.join(missing_passages)}\n['🗂️ 지문 DB 관리'] 탭에서 해당 지문들을 먼저 등록해주세요!")
+            else:
+                total_expected_questions = len(selected_q_nums) * len(selected_types_list)
+                st.info(f"💡 총 {total_expected_questions}문제 출제를 시작합니다. 무한 생성 엔진이 가동 중입니다...")
                 
-                exam_key = f"{exam_year}_{exam_month}_{exam_grade}"
-                current_db = st.session_state.passage_db.get(exam_key, {})
+                # 💥 무한 출제를 위한 릴레이(Batch) 엔진 가동
+                chunk_size = 3 # 한 번에 3개 지문씩 묶어서 AI에게 질문 (안정성 확보)
+                all_generated_problems = []
                 
-                passages_text = ""
-                missing_passages = []
+                progress_bar = st.progress(0)
+                status_text = st.empty()
                 
-                for idx, q in enumerate(selected_q_nums):
-                    if q in current_db and current_db[q].strip() != "":
+                model = genai.GenerativeModel('gemini-3.6-flash')
+                
+                total_chunks = (len(selected_q_nums) + chunk_size - 1) // chunk_size
+                
+                for i in range(0, len(selected_q_nums), chunk_size):
+                    chunk_q_nums = selected_q_nums[i:i + chunk_size]
+                    current_chunk_idx = (i // chunk_size) + 1
+                    
+                    status_text.text(f"🏃 릴레이 출제 중... (총 {total_chunks}구간 중 {current_chunk_idx}구간 생성 중)")
+                    
+                    passages_text = ""
+                    for idx, q in enumerate(chunk_q_nums):
                         text = current_db[q]
-                        passages_text += f"[지문 {idx+1} - {q}]\n{text}\n\n"
-                    else:
-                        missing_passages.append(q)
-                
-                if missing_passages:
-                    st.error(f"🚨 다음 지문들이 DB에 등록되지 않았습니다: {', '.join(missing_passages)}\n['🗂️ 지문 DB 관리'] 탭에서 해당 지문들을 먼저 등록해주세요!")
-                else:
-                    prompt = f"""당신은 고등학교 내신 영어 출제 전문가입니다. 제공된 지문으로 변형 문제를 출제하세요.
+                        passages_text += f"[지문 {q}]\n{text}\n\n"
+                        
+                    prompt = f"""당신은 고등학교 내신 영어 출제 전문가입니다.
 
 [💥 핵심 출제 지침 - 가장 중요 💥]
 제공된 **각각의 지문마다**, 아래 [선택된 문제 유형]에 해당하는 문제를 **빠짐없이 1개씩 모두** 출제해야 합니다.
-(즉, 1개의 지문에 대해 총 {len(selected_types_list)}개의 문제가 연속으로 만들어져야 하며, 최종 출력되는 전체 문제 수는 {len(selected_q_nums) * len(selected_types_list)}개여야 합니다. 문제 번호는 1번부터 차례대로 부여하세요.)
+(즉, 1개의 지문에 대해 총 {len(selected_types_list)}개의 문제가 연속으로 만들어져야 합니다.)
 
 [선택된 문제 유형]: {', '.join(selected_types_list)}
 
@@ -279,185 +294,121 @@ with tab_exam:
 {passages_text}
 
 [출력 규칙 - 매우 엄격함]
-1. 어떠한 부연 설명도 하지 말고, 오직 유효한 JSON 배열(Array) 형식만 출력하세요. 
+1. 부연 설명 없이, 오직 유효한 JSON 배열(Array) 형식만 출력하세요. 
 2. 백틱(```)이나 마크다운 기호는 절대 사용하지 마세요.
-3. JSON 배열의 각 객체는 다음 키를 가져야 합니다: "question", "passage", "options", "answer", "explanation"
-4. "question": 문제 발문 (예: "1. 다음 글의 밑줄 친 부분 중, 어법상 틀린 것은?")
-5. "passage": 지문 내용 원문. 문단 바꿈은 <br/>로 처리하세요. 어법/어휘 문제의 경우 지문 내에 ① <u>단어</u> 형태로 직접 번호와 밑줄을 넣으세요. 문장 삽입 문제의 경우 주어진 문장 박스도 포함해야 하니 [박스]주어진문장[/박스] 형태로 상단에 표기하세요.
-6. "options": 선택지 리스트. ["① apple", "② banana", ...]. 하단 선택지가 필요 없다면 빈 리스트 [] 를 반환하세요.
-7. "answer": 정답 번호 (예: "5")
-8. "explanation": 정답의 근거와 오답의 이유를 상세히 적은 해설 텍스트.
+3. JSON 키: "question", "passage", "options", "answer", "explanation"
+4. "question": 문제 발문
+5. "passage": 지문 내용 원문. 문단 바꿈은 <br/> 처리. 
+6. "options": 선택지 리스트. ["① apple", "② banana"...]. 필요 없으면 빈 리스트 [] 반환.
+7. "answer": 정답 번호
+8. "explanation": 해설 텍스트.
 """
                     try:
-                        model = genai.GenerativeModel('gemini-3.6-flash')
                         response = model.generate_content(prompt)
-                        
-                        # 💥 복사 오류 원천 차단: 안전한 문자열 교체 방식 사용
-                        raw_text = response.text.strip()
-                        raw_text = raw_text.replace("```json", "").replace("```", "").strip()
-                            
-                        problems_data = json.loads(raw_text)
-                        
-                        questions_html = ""
-                        answers_html = ""
-                        
-                        for idx, data in enumerate(problems_data):
-                            q_title = data.get("question", f"{idx+1}. 문제가 누락되었습니다.")
-                            passage_raw = data.get("passage", "")
-                            
-                            if "[박스]" in passage_raw and "[/박스]" in passage_raw:
-                                inserted_box = passage_raw.split("[박스]")[1].split("[/박스]")[0]
-                                main_passage = passage_raw.split("[/박스]")[1].strip()
-                                passage_html = f'<div class="passage-box" style="margin-bottom: 5px;">{inserted_box}</div>'
-                                passage_html += f'<div class="passage-box">{main_passage}</div>'
-                            else:
-                                passage_html = f'<div class="passage-box">{passage_raw}</div>'
-                            
-                            options_html = ""
-                            options = data.get("options", [])
-                            if options and len(options) > 0:
-                                options_html += '<div class="options-container">'
-                                for opt in options:
-                                    options_html += f'<div class="option-item">{opt}</div>'
-                                options_html += '</div>'
-                                
-                            q_num_only = q_title.split('.')[0] if '.' in q_title else str(idx+1)
-                            answer = data.get("answer", "")
-                            explanation = data.get("explanation", "")
-                            
-                            questions_html += f'''
-                            <div class="question-block">
-                                <div class="question-title">{q_title}</div>
-                                {passage_html}
-                                {options_html}
-                            </div>
-                            '''
-                            
-                            answers_html += f'''
-                            <div class="answer-block">
-                                <b>{q_num_only}번 - {answer}</b><br/>
-                                <b>[해설]</b> {explanation}
-                            </div>
-                            '''
-
-                        header_title = f"{exam_year} {exam_month} {exam_grade} 모의고사 변형문제"
-                        
-                        html_content = f'''
-                        <!DOCTYPE html>
-                        <html lang="ko">
-                        <head>
-                            <meta charset="utf-8">
-                            <title>{header_title}</title>
-                            <style>
-                                @import url('[https://fonts.googleapis.com/css2?family=Nanum+Myeongjo:wght@400;700&display=swap](https://fonts.googleapis.com/css2?family=Nanum+Myeongjo:wght@400;700&display=swap)');
-                                @import url('[https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@700&display=swap](https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@700&display=swap)');
-                                
-                                body {{ 
-                                    font-family: 'Nanum Myeongjo', serif; 
-                                    font-size: 9.5pt; 
-                                    line-height: 1.4; 
-                                    color: #000; 
-                                    max-width: 210mm;
-                                    margin: 0 auto;
-                                    padding: 20px;
-                                }}
-                                .header-container {{ 
-                                    font-family: 'Noto Sans KR', sans-serif; 
-                                    display: flex;
-                                    justify-content: space-between;
-                                    align-items: flex-end;
-                                    border-bottom: 2px solid #000; 
-                                    padding-bottom: 8px; 
-                                    margin-bottom: 15px; 
-                                }}
-                                .header-title {{ font-size: 14pt; font-weight: bold; }}
-                                .header-sub {{ font-size: 8.5pt; color: #555; }}
-                                
-                                .two-column-layout {{
-                                    column-count: 2;
-                                    column-gap: 25px; 
-                                    column-fill: auto;
-                                }}
-                                .question-block {{ 
-                                    break-inside: avoid; 
-                                    page-break-inside: avoid; 
-                                    margin-bottom: 25px; 
-                                    text-align: justify; 
-                                    word-break: keep-all; 
-                                }}
-                                .question-title {{
-                                    font-family: 'Noto Sans KR', sans-serif;
-                                    font-size: 10pt; 
-                                    font-weight: bold;
-                                    margin-bottom: 4px;
-                                }}
-                                .passage-box {{ 
-                                    border: 1.1px solid #000; 
-                                    padding: 5px 8px; 
-                                    margin: 3px 0; 
-                                    background-color: #fff;
-                                    text-align: justify;
-                                    word-break: keep-all; 
-                                    overflow-wrap: break-word; 
-                                }}
-                                .options-container {{ margin-top: 4px; }}
-                                .option-item {{
-                                    display: inline-block;
-                                    margin-right: 15px; 
-                                    margin-bottom: 3px;
-                                    text-align: left; 
-                                    word-break: keep-all;
-                                }}
-                                .answers-section {{ 
-                                    break-before: page; 
-                                    page-break-before: always; 
-                                    margin-top: 30px; 
-                                }}
-                                .section-title {{ 
-                                    font-family: 'Noto Sans KR', sans-serif;
-                                    font-size: 13pt; 
-                                    font-weight: bold; 
-                                    text-align: center; 
-                                    border-bottom: 1px solid #000; 
-                                    padding-bottom: 8px; 
-                                    margin-bottom: 20px; 
-                                }}
-                                .answer-block {{ 
-                                    break-inside: avoid; 
-                                    page-break-inside: avoid;
-                                    margin-bottom: 15px; 
-                                    text-align: justify; 
-                                    word-break: keep-all; 
-                                }}
-                                @media print {{
-                                    @page {{ margin: 15mm; }}
-                                    body {{ padding: 0; }}
-                                }}
-                            </style>
-                        </head>
-                        <body>
-                            <div class="header-container">
-                                <div class="header-title">{header_title}</div>
-                                <div class="header-sub">SDH ACADEMY & Internal Exam System</div>
-                            </div>
-                            <div class="two-column-layout">
-                                {questions_html}
-                            </div>
-                            <div class="answers-section">
-                                <div class="section-title">정답 및 해설</div>
-                                <div class="two-column-layout">
-                                    {answers_html}
-                                </div>
-                            </div>
-                        </body>
-                        </html>
-                        '''
-                        st.success("✅ 출제 완료! 완벽한 시험지가 조립되었습니다.")
-                        st.download_button("📥 상용 서비스급 시험지 다운로드", data=html_content, file_name="SDH_Premium_Exam.html", mime="text/html")
-                    except json.JSONDecodeError as e:
-                        st.error("AI가 구조화된 데이터를 생성하지 못했습니다. 다시 시도해주세요.")
+                        raw_text = response.text.strip().replace("```json", "").replace("```", "").strip()
+                        chunk_problems = json.loads(raw_text)
+                        all_generated_problems.extend(chunk_problems)
                     except Exception as e:
-                        st.error(f"오류가 발생했습니다: {e}")
+                        st.error(f"{current_chunk_idx}구간 생성 중 오류가 발생하여 건너뜁니다. (오류: {e})")
+                        time.sleep(1) # 에러 시 잠시 대기
+                        
+                    # 진행률 업데이트
+                    progress_bar.progress(current_chunk_idx / total_chunks)
+                
+                # 💥 릴레이 출제 완료 후 HTML 렌더링
+                status_text.text("✅ 모든 문제 출제 완료! 최종 150+문제 시험지로 조립 중...")
+                
+                questions_html = ""
+                answers_html = ""
+                
+                for idx, data in enumerate(all_generated_problems):
+                    # 문제 번호를 전체 순서에 맞게 강제 재부여
+                    q_title_original = data.get("question", "")
+                    q_title_text = q_title_original.split(".", 1)[1].strip() if "." in q_title_original else q_title_original
+                    q_title = f"{idx+1}. {q_title_text}"
+                    
+                    passage_raw = data.get("passage", "")
+                    if "[박스]" in passage_raw and "[/박스]" in passage_raw:
+                        inserted_box = passage_raw.split("[박스]")[1].split("[/박스]")[0]
+                        main_passage = passage_raw.split("[/박스]")[1].strip()
+                        passage_html = f'<div class="passage-box" style="margin-bottom: 5px;">{inserted_box}</div>'
+                        passage_html += f'<div class="passage-box">{main_passage}</div>'
+                    else:
+                        passage_html = f'<div class="passage-box">{passage_raw}</div>'
+                    
+                    options_html = ""
+                    options = data.get("options", [])
+                    if options and len(options) > 0:
+                        options_html += '<div class="options-container">'
+                        for opt in options:
+                            options_html += f'<div class="option-item">{opt}</div>'
+                        options_html += '</div>'
+                        
+                    answer = data.get("answer", "")
+                    explanation = data.get("explanation", "")
+                    
+                    questions_html += f'''
+                    <div class="question-block">
+                        <div class="question-title">{q_title}</div>
+                        {passage_html}
+                        {options_html}
+                    </div>
+                    '''
+                    
+                    answers_html += f'''
+                    <div class="answer-block">
+                        <b>{idx+1}번 - {answer}</b><br/>
+                        <b>[해설]</b> {explanation}
+                    </div>
+                    '''
+
+                header_title = f"{exam_year} {exam_month} {exam_grade} 모의고사 변형문제"
+                
+                html_content = f'''
+                <!DOCTYPE html>
+                <html lang="ko">
+                <head>
+                    <meta charset="utf-8">
+                    <title>{header_title}</title>
+                    <style>
+                        @import url('https://fonts.googleapis.com/css2?family=Nanum+Myeongjo:wght@400;700&display=swap');
+                        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@700&display=swap');
+                        
+                        body {{ font-family: 'Nanum Myeongjo', serif; font-size: 9.5pt; line-height: 1.4; color: #000; max-width: 210mm; margin: 0 auto; padding: 20px; }}
+                        .header-container {{ font-family: 'Noto Sans KR', sans-serif; display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 2px solid #000; padding-bottom: 8px; margin-bottom: 15px; }}
+                        .header-title {{ font-size: 14pt; font-weight: bold; }}
+                        .header-sub {{ font-size: 8.5pt; color: #555; }}
+                        .two-column-layout {{ column-count: 2; column-gap: 25px; column-fill: auto; }}
+                        .question-block {{ break-inside: avoid; page-break-inside: avoid; margin-bottom: 25px; text-align: justify; word-break: keep-all; }}
+                        .question-title {{ font-family: 'Noto Sans KR', sans-serif; font-size: 10pt; font-weight: bold; margin-bottom: 4px; }}
+                        .passage-box {{ border: 1.1px solid #000; padding: 5px 8px; margin: 3px 0; background-color: #fff; text-align: justify; word-break: keep-all; overflow-wrap: break-word; }}
+                        .options-container {{ margin-top: 4px; }}
+                        .option-item {{ display: inline-block; margin-right: 15px; margin-bottom: 3px; text-align: left; word-break: keep-all; }}
+                        .answers-section {{ break-before: page; page-break-before: always; margin-top: 30px; }}
+                        .section-title {{ font-family: 'Noto Sans KR', sans-serif; font-size: 13pt; font-weight: bold; text-align: center; border-bottom: 1px solid #000; padding-bottom: 8px; margin-bottom: 20px; }}
+                        .answer-block {{ break-inside: avoid; page-break-inside: avoid; margin-bottom: 15px; text-align: justify; word-break: keep-all; }}
+                        @media print {{ @page {{ margin: 15mm; }} body {{ padding: 0; }} }}
+                    </style>
+                </head>
+                <body>
+                    <div class="header-container">
+                        <div class="header-title">{header_title}</div>
+                        <div class="header-sub">SDH ACADEMY & Internal Exam System</div>
+                    </div>
+                    <div class="two-column-layout">
+                        {questions_html}
+                    </div>
+                    <div class="answers-section">
+                        <div class="section-title">정답 및 해설</div>
+                        <div class="two-column-layout">
+                            {answers_html}
+                        </div>
+                    </div>
+                </body>
+                </html>
+                '''
+                st.success(f"🎉 대성공! 총 {len(all_generated_problems)}문제가 담긴 거대한 시험지가 1개의 파일로 완벽하게 조립되었습니다.")
+                st.download_button("📥 상용 서비스급 대용량 시험지 다운로드", data=html_content, file_name="SDH_Premium_Exam_Massive.html", mime="text/html")
 
 # ==========================================
 # 하단 푸터
