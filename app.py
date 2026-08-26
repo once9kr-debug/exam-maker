@@ -251,8 +251,8 @@ with tab_exam:
                             
                             body {{ 
                                 font-family: 'Nanum Myeongjo', serif; 
-                                font-size: 10.5pt; 
-                                line-height: 1.5; 
+                                font-size: 9.5pt; /* 💥 10.5pt에서 9.5pt로 압축 (수능 표준) */
+                                line-height: 1.4; /* 💥 줄 간격 1.5에서 1.4로 다이어트 */
                                 color: #000; 
                                 max-width: 210mm;
                                 margin: 0 auto;
@@ -264,59 +264,60 @@ with tab_exam:
                                 justify-content: space-between;
                                 align-items: flex-end;
                                 border-bottom: 2px solid #000; 
-                                padding-bottom: 10px; 
-                                margin-bottom: 25px; 
+                                padding-bottom: 8px; /* 💥 여백 축소 */
+                                margin-bottom: 15px; /* 💥 여백 축소 */
                             }}
-                            .header-title {{ font-size: 15pt; font-weight: bold; }}
-                            .header-sub {{ font-size: 9pt; color: #555; }}
+                            .header-title {{ font-size: 14pt; font-weight: bold; }}
+                            .header-sub {{ font-size: 8.5pt; color: #555; }}
                             
                             .two-column-layout {{
                                 column-count: 2;
-                                column-gap: 35px;
+                                column-gap: 25px; /* 💥 단 사이 간격을 좁혀서 양옆 텍스트 공간을 더 확보 */
                                 column-fill: auto;
                             }}
                             .question-block {{ 
                                 break-inside: avoid; 
                                 page-break-inside: avoid; 
-                                margin-bottom: 40px; 
+                                margin-bottom: 25px; /* 💥 문제 간 간격을 40px에서 25px로 대폭 축소 */
                                 text-align: justify; 
                                 word-break: keep-all; 
                             }}
                             .question-title {{
                                 font-family: 'Noto Sans KR', sans-serif;
+                                font-size: 10pt; /* 💥 발문 크기 약간 조절 */
                                 font-weight: bold;
-                                margin-bottom: 6px;
+                                margin-bottom: 4px;
                             }}
                             .passage-box {{ 
                                 border: 1.1px solid #000; 
-                                padding: 5px 10px; 
+                                padding: 5px 8px; /* 💥 박스 내부 여백을 더 타이트하게 */
                                 margin: 3px 0; 
                                 background-color: #fff;
                                 text-align: justify;
                                 word-break: keep-all; 
                                 overflow-wrap: break-word; 
                             }}
-                            .options-container {{ margin-top: 6px; }}
+                            .options-container {{ margin-top: 4px; }}
                             .option-item {{
                                 display: inline-block;
-                                margin-right: 18px; 
-                                margin-bottom: 4px;
+                                margin-right: 15px; 
+                                margin-bottom: 3px;
                                 text-align: left; 
                                 word-break: keep-all;
                             }}
                             .answers-section {{ 
                                 break-before: page; 
                                 page-break-before: always; 
-                                margin-top: 50px; 
+                                margin-top: 30px; 
                             }}
                             .section-title {{ 
                                 font-family: 'Noto Sans KR', sans-serif;
-                                font-size: 14pt; 
+                                font-size: 13pt; 
                                 font-weight: bold; 
                                 text-align: center; 
                                 border-bottom: 1px solid #000; 
-                                padding-bottom: 10px; 
-                                margin-bottom: 25px; 
+                                padding-bottom: 8px; 
+                                margin-bottom: 20px; 
                             }}
                             .answer-block {{ 
                                 break-inside: avoid; 
