@@ -3,6 +3,7 @@ import pandas as pd
 import google.generativeai as genai
 import json
 import os
+import PyPDF2  # PDF 처리를 위한 라이브러리 추가
 
 # ==========================================
 # 페이지 기본 설정 (Wide 모드)
@@ -10,7 +11,7 @@ import os
 st.set_page_config(page_title="SDH ACADEMY 통합 출제 플랫폼", layout="wide")
 
 # ==========================================
-# 커스텀 CSS (UI 개선)
+# 커스텀 CSS
 # ==========================================
 st.markdown("""
 <style>
@@ -36,7 +37,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 💥 핵심 고도화 1: 로컬 영구 DB(JSON) 연동 엔진
+# 로컬 영구 DB(JSON) 연동 엔진
 # ==========================================
 DB_FILE = "sdh_passages_db.json"
 
@@ -44,13 +45,12 @@ def load_db():
     if os.path.exists(DB_FILE):
         with open(DB_FILE, "r", encoding="utf-8") as f:
             return json.load(f)
-    return {} # 파일이 없으면 빈 저장소 반환
+    return {}
 
 def save_db(db_data):
     with open(DB_FILE, "w", encoding="utf-8") as f:
         json.dump(db_data, f, ensure_ascii=False, indent=4)
 
-# 세션에 DB 불러오기
 if 'passage_db' not in st.session_state:
     st.session_state.passage_db = load_db()
 
@@ -67,9 +67,9 @@ st.title("SDH ACADEMY 통합 출제 플랫폼 🛠️")
 st.markdown("---")
 
 # ==========================================
-# 메인 탭 구성 (지문 DB 관리 탭 신설!)
+# 메인 탭 구성
 # ==========================================
-tab_search, tab_db, tab_exam = st.tabs(["🔍 모의고사 검색", "🗂️ 지문 DB 관리 (New!)", "🎯 세부 변형문제 제작"])
+tab_search, tab_db, tab_exam = st.tabs(["🔍 모의고사 검색", "🗂️ 지문 DB 관리", "🎯 세부 변형문제 제작"])
 
 # ------------------------------------------
 # 탭 1: 모의고사 검색
@@ -99,42 +99,87 @@ with tab_search:
     st.dataframe(pd.DataFrame(db_data), use_container_width=True, hide_index=True)
 
 # ------------------------------------------
-# 탭 2: 💥 지문 DB 관리 (선생님들 전용 업로드 창)
+# 탭 2: 지문 DB 관리 (PDF 자동 추출 기능 추가)
 # ------------------------------------------
 with tab_db:
     st.markdown(f"##### 🗂️ 현재 선택된 출제 대상: **{exam_year} {exam_month}, {exam_grade}**")
-    st.info("💡 한글(HWP) 파일이나 웹사이트에서 지문 텍스트를 복사하여 아래에 붙여넣고 저장하세요. 저장된 지문은 '변형문제 제작' 시 자동으로 불러와집니다.")
-    
-    # DB 구분을 위한 고유 키 생성 (예: "2026년_6월_고1")
     exam_key = f"{exam_year}_{exam_month}_{exam_grade}"
     
     if exam_key not in st.session_state.passage_db:
         st.session_state.passage_db[exam_key] = {}
 
-    db_col1, db_col2 = st.columns([1, 2.5])
+    st.markdown("---")
+    # 💥 기능 1: PDF 인공지능 자동 추출
+    st.markdown("### 🚀 [추천] 방법 1. PDF 파일로 한 번에 자동 등록하기")
+    st.info("평가원이나 교육청의 모의고사 PDF 파일을 업로드하면, AI가 18번~45번 지문만 쏙쏙 뽑아 DB에 자동 저장합니다.")
     
+    uploaded_pdf = st.file_uploader("PDF 파일 업로드", type=["pdf"])
+    
+    if uploaded_pdf is not None:
+        if st.button("✨ AI 자동 추출 및 DB 전체 저장", type="primary"):
+            with st.spinner("AI가 PDF를 읽고 불필요한 선택지를 버린 뒤, 순수 지문만 추출하고 있습니다. (약 30~60초 소요)"):
+                try:
+                    # PDF 텍스트 추출
+                    pdf_reader = PyPDF2.PdfReader(uploaded_pdf)
+                    raw_text = ""
+                    for page in pdf_reader.pages:
+                        raw_text += page.extract_text() + "\n"
+                        
+                    # Gemini에게 지문 발췌 명령
+                    prompt = f'''다음은 고등학교 영어 모의고사 PDF에서 추출한 거친 텍스트(Raw Text)입니다.
+이 텍스트를 분석하여 18번부터 45번까지의 '영어 지문(Passage) 원문'만 정확하게 발췌한 뒤, JSON 형태로 출력해 주세요.
+
+[추출 규칙 - 매우 엄격함]
+1. 문제 발문("다음 글의 목적으로...", "빈칸에 들어갈 말로...")과 하단 선택지(①, ②...)는 절대 포함하지 마세요. 오직 영어 지문 본문만 추출하세요.
+2. 어법/어휘 문제에 있는 밑줄이나 번호(①, ②)는 원문 그대로 유지하세요.
+3. JSON 키(Key)는 반드시 "18번", "19번", ... "45번" 형식이어야 합니다. 텍스트가 없는 번호는 건너뛰세요.
+4. 어떠한 인사말이나 마크다운(```json) 없이 완벽한 JSON 형식만 출력하세요.
+
+[원문 텍스트]
+{raw_text}
+'''
+                    model = genai.GenerativeModel('gemini-3.6-flash')
+                    response = model.generate_content(prompt)
+                    
+                    # JSON 파싱
+                    res_text = response.text.strip()
+                    if res_text.startswith("```json"): res_text = res_text[7:]
+                    if res_text.startswith("```"): res_text = res_text[3:]
+                    if res_text.endswith("```"): res_text = res_text[:-3]
+                    
+                    extracted_data = json.loads(res_text.strip())
+                    
+                    # DB에 업데이트
+                    for q_num, passage in extracted_data.items():
+                        st.session_state.passage_db[exam_key][q_num] = passage
+                    save_db(st.session_state.passage_db)
+                    
+                    st.success(f"🎉 성공! 총 {len(extracted_data)}개의 지문이 완벽하게 추출되어 DB에 저장되었습니다.")
+                except Exception as e:
+                    st.error(f"자동 추출 중 오류가 발생했습니다: {e}")
+
+    st.markdown("---")
+    
+    # 기능 2: 수동 개별 등록 (기존)
+    st.markdown("### ✍️ 방법 2. 개별 수동 등록 및 수정")
+    db_col1, db_col2 = st.columns([1, 2.5])
     with db_col1:
-        st.markdown("**1. 지문 번호 선택**")
-        target_q = st.selectbox("몇 번 지문입니까?", [f"{q}번" for q in range(18, 46)])
-        
-        # 현재 저장된 지문이 있는지 확인
+        target_q = st.selectbox("수정/등록할 지문 번호", [f"{q}번" for q in range(18, 46)])
         existing_text = st.session_state.passage_db[exam_key].get(target_q, "")
         if existing_text:
-            st.success("✅ 이미 등록된 지문이 있습니다. 수정하려면 우측에 덮어쓰세요.")
+            st.success("✅ 현재 DB에 등록된 지문이 있습니다.")
         else:
             st.warning("❌ 등록된 지문이 없습니다.")
             
     with db_col2:
-        st.markdown("**2. 지문 내용 입력**")
-        new_passage_text = st.text_area(f"{target_q} 지문 원문 (어법/어휘 문제는 번호와 밑줄을 추가해두면 좋습니다.)", value=existing_text, height=250)
-        
-        if st.button("💾 지문 DB에 영구 저장하기", type="primary"):
+        new_passage_text = st.text_area(f"{target_q} 지문 원문", value=existing_text, height=250)
+        if st.button("💾 개별 지문 수정/저장"):
             if new_passage_text.strip() == "":
                 st.error("지문 내용을 입력해주세요.")
             else:
                 st.session_state.passage_db[exam_key][target_q] = new_passage_text.strip()
                 save_db(st.session_state.passage_db)
-                st.success(f"{target_q} 지문이 성공적으로 저장되었습니다! 이제 출제가 가능합니다.")
+                st.success(f"{target_q} 지문이 성공적으로 저장되었습니다!")
 
 # ------------------------------------------
 # 탭 3: 세부 변형문제 제작
@@ -200,7 +245,6 @@ with tab_exam:
         else:
             with st.spinner("최고급 명조체 템플릿에 맞추어 문제를 출제하고 있습니다. (약 15~30초)"):
                 
-                # 💥 자동화된 로컬 DB에서 지문을 동적으로 불러오는 로직
                 exam_key = f"{exam_year}_{exam_month}_{exam_grade}"
                 current_db = st.session_state.passage_db.get(exam_key, {})
                 
@@ -215,7 +259,7 @@ with tab_exam:
                         missing_passages.append(q)
                 
                 if missing_passages:
-                    st.error(f"🚨 다음 지문들이 DB에 등록되지 않았습니다: {', '.join(missing_passages)}\n['🗂️ 지문 DB 관리'] 탭에서 해당 지문들을 먼저 저장해주세요!")
+                    st.error(f"🚨 다음 지문들이 DB에 등록되지 않았습니다: {', '.join(missing_passages)}\n['🗂️ 지문 DB 관리'] 탭에서 해당 지문들을 먼저 등록해주세요!")
                 else:
                     prompt = f'''당신은 고등학교 내신 영어 출제 전문가입니다. 제공된 지문으로 변형 문제를 만드세요.
 [선택된 문제 유형]: {', '.join(final_selected_types)}
@@ -229,17 +273,6 @@ with tab_exam:
 5. "options": 선택지 리스트. ["① apple", "② banana", ...]. 만약 어법/어휘/문장 삽입처럼 지문 안에 이미 번호가 있어서 하단 선택지가 필요 없다면 빈 리스트 [] 를 반환하세요.
 6. "answer": 정답 번호 (예: "5")
 7. "explanation": 정답의 근거와 오답의 이유를 상세히 적은 해설 텍스트.
-
-[출력 JSON 예시]
-[
-  {{
-    "question": "1. 다음 글의 제목으로 가장 적절한 것은?",
-    "passage": "In today's fast-paced world... (생략)",
-    "options": ["① The importance of time", "② How to relax", "③ Why we sleep", "④ Fast-paced modern life", "⑤ Value of health"],
-    "answer": "1",
-    "explanation": "시간의 중요성에 대해 반복적으로 강조하고 있는 글입니다."
-  }}
-]
 '''
                     try:
                         model = genai.GenerativeModel('gemini-3.6-flash')
