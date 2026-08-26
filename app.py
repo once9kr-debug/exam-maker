@@ -16,7 +16,7 @@ from io import BytesIO
 st.set_page_config(page_title="SDH ACADEMY 통합 출제 플랫폼", layout="wide")
 
 # ==========================================
-# 🎨 커스텀 CSS (평가원 모의고사 극강 렌더링)
+# 🎨 커스텀 CSS
 # ==========================================
 st.markdown("""
 <style>
@@ -33,7 +33,6 @@ st.markdown("""
 def create_word_file(problems_list, header_title):
     doc = docx.Document()
     
-    # 평가원 스타일 여백 최소화 설정
     for section in doc.sections:
         section.top_margin = Inches(0.5)
         section.bottom_margin = Inches(0.5)
@@ -51,7 +50,6 @@ def create_word_file(problems_list, header_title):
 
         passage_raw = data.get("passage", "").replace("<br/>", "\n").replace("<br>", "\n")
         
-        # 주어진 문장 박스 처리
         if "[박스]" in passage_raw and "[/박스]" in passage_raw:
             try:
                 inserted_box = passage_raw.split("[박스]")[1].split("[/박스]")[0]
@@ -73,7 +71,6 @@ def create_word_file(problems_list, header_title):
             doc.add_paragraph("  ".join(options))
         doc.add_paragraph("")
 
-    # 정답 및 해설 섹션
     doc.add_page_break()
     doc.add_heading("정답 및 해설", level=1)
     for idx, data in enumerate(problems_list):
@@ -131,9 +128,6 @@ st.markdown("---")
 
 tab_search, tab_db, tab_exam = st.tabs(["🔍 모의고사 검색", "🗂️ 지문 DB 관리", "🎯 세부 변형문제 제작"])
 
-# ------------------------------------------
-# 탭 1 & 탭 2 (DB 관리 유지)
-# ------------------------------------------
 with tab_search:
     st.markdown("<div class='group-header'>📚 모의고사 DB 검색</div>", unsafe_allow_html=True)
     col1, col2, col3, col4, col5 = st.columns([1.5, 1, 1, 1, 1])
@@ -169,9 +163,6 @@ with tab_db:
                     st.success("🎉 DB 저장 완료!")
                 except Exception as e: st.error(f"오류: {e}")
 
-# ------------------------------------------
-# 탭 3: 세부 변형문제 제작 
-# ------------------------------------------
 with tab_exam:
     st.markdown(f"##### 📝 출제 대상: **{exam_year} {exam_month}, {exam_grade} 모의고사**")
     st.checkbox("✅ 전체 유형 선택", key="type_all", on_change=toggle_all_types)
@@ -203,16 +194,16 @@ with tab_exam:
     if st.button("🛒 1단계: 출제 대기열(Queue) 생성하기", type="secondary", use_container_width=True):
         selected_q_nums = [f"{num}번" for num in range(18, 46) if st.session_state.get(f"q_{num}")]
         selected_types_list = []
-        if t_topic: selected_types_list.append("주제 추론"); 
-        if t_title: selected_types_list.append("제목 추론"); 
-        if t_purpose: selected_types_list.append("목적/요지"); 
-        if t_blank: selected_types_list.append("빈칸 추론"); 
-        if t_order: selected_types_list.append("글의 순서"); 
-        if t_insert: selected_types_list.append("문장 삽입"); 
-        if t_imply: selected_types_list.append("함축 의미"); 
-        if t_grammar: selected_types_list.append("어법 추론"); 
-        if t_vocab: selected_types_list.append("어휘 추론"); 
-        if t_essay: selected_types_list.append("서술형 영작"); 
+        if t_topic: selected_types_list.append("주제 추론")
+        if t_title: selected_types_list.append("제목 추론")
+        if t_purpose: selected_types_list.append("목적/요지")
+        if t_blank: selected_types_list.append("빈칸 추론")
+        if t_order: selected_types_list.append("글의 순서")
+        if t_insert: selected_types_list.append("문장 삽입")
+        if t_imply: selected_types_list.append("함축 의미")
+        if t_grammar: selected_types_list.append("어법 추론")
+        if t_vocab: selected_types_list.append("어휘 추론")
+        if t_essay: selected_types_list.append("서술형 영작")
         if t_match: selected_types_list.append("내용 일치/불일치")
 
         if not selected_types_list or not selected_q_nums:
@@ -236,7 +227,6 @@ with tab_exam:
         remain_tasks = len(st.session_state.exam_queue)
         st.markdown(f"<div class='status-box'><b>📊 현재 출제 현황:</b> 총 {st.session_state.total_tasks}문제 중 <b>{remain_tasks}문제 남음</b></div>", unsafe_allow_html=True)
         
-        # 💥 워드와 HTML 동시 다운로드 지원
         if st.session_state.generated_files:
             st.markdown("### 📥 완성된 시험지 다운로드")
             for file_info in st.session_state.generated_files:
@@ -329,7 +319,6 @@ with tab_exam:
                     if cache_key in cached_results:
                         all_generated_problems.append(cached_results[cache_key])
                 
-                # 💥 1. 극강의 평가원 스타일 CSS HTML 조립
                 questions_html = ""
                 answers_html = ""
                 
@@ -351,12 +340,12 @@ with tab_exam:
                         for opt in options: options_html += f'<div class="option-item">{opt}</div>'
                         options_html += '</div>'
                         
-                    # page-break-inside 적용
                     questions_html += f'<div class="question-block"><div class="question-title">{q_title}</div>{passage_html}{options_html}</div>'
                     answers_html += f'<div class="answer-block"><b>{idx+1}번 - {data.get("answer", "")}</b><br/><b>[해설]</b> {data.get("explanation", "")}</div>'
 
                 header_title = f"{exam_year} {exam_month} {exam_grade} 모의고사 변형문제 (Part {st.session_state.part_counter})"
                 
+                # 💥 3. CSS 초정밀 튜닝: 양쪽 정렬(justify) 적용 및 단어 찢어짐 방지(word-break: normal)
                 html_content = f'''
                 <!DOCTYPE html><html lang="ko"><head><meta charset="utf-8"><title>{header_title}</title>
                 <style>
@@ -367,15 +356,17 @@ with tab_exam:
                     .header-title {{ font-size: 14pt; font-weight: bold; }}
                     .header-sub {{ font-size: 8.5pt; color: #555; }}
                     .two-column-layout {{ column-count: 2; column-gap: 25px; column-fill: auto; }}
-                    /* 문제 블록 인쇄 잘림 완벽 방지 */
                     .question-block {{ break-inside: avoid; page-break-inside: avoid; margin-bottom: 30px; text-align: left; word-break: keep-all; }}
                     .question-title {{ font-family: 'Noto Sans KR', sans-serif; font-size: 10.5pt; font-weight: bold; margin-bottom: 5px; }}
-                    .passage-box {{ border: 1.2px solid #000; padding: 8px 10px; margin: 5px 0; background-color: #fff; text-align: left; word-break: keep-all; overflow-wrap: break-word; }}
-                    .inserted-box {{ border: 1.5px solid #555; padding: 7px; margin-bottom: 8px; text-align: left; background-color: #f9f9f9; }}
+                    
+                    /* 💥 핵심: 양쪽 정렬(justify) 유지하되 영문 띄어쓰기 보호(word-break: normal) */
+                    .passage-box {{ border: 1.2px solid #000; padding: 8px 10px; margin: 5px 0; background-color: #fff; text-align: justify; word-break: normal; overflow-wrap: break-word; }}
+                    .inserted-box {{ border: 1.5px solid #555; padding: 7px; margin-bottom: 8px; text-align: justify; word-break: normal; background-color: #f9f9f9; }}
+                    
                     .options-container {{ margin-top: 8px; }} .option-item {{ display: inline-block; margin-right: 15px; margin-bottom: 4px; }}
                     .answers-section {{ break-before: page; page-break-before: always; margin-top: 30px; }}
                     .section-title {{ font-family: 'Noto Sans KR', sans-serif; font-size: 13pt; font-weight: bold; text-align: center; border-bottom: 1px solid #000; padding-bottom: 8px; margin-bottom: 20px; }}
-                    .answer-block {{ break-inside: avoid; page-break-inside: avoid; margin-bottom: 15px; text-align: left; word-break: keep-all; }}
+                    .answer-block {{ break-inside: avoid; page-break-inside: avoid; margin-bottom: 15px; text-align: justify; word-break: keep-all; }}
                     @media print {{ @page {{ margin: 12mm; }} body {{ padding: 0; }} }}
                 </style></head><body>
                 <div class="header-container"><div class="header-title">{header_title}</div><div class="header-sub">SDH Premium Decoding</div></div>
@@ -383,7 +374,6 @@ with tab_exam:
                 <div class="answers-section"><div class="section-title">정답 및 해설</div><div class="two-column-layout">{answers_html}</div></div>
                 </body></html>'''
                 
-                # 💥 2. Word(.docx) 파일 엔진 가동
                 word_buffer = create_word_file(all_generated_problems, header_title)
                 
                 st.session_state.generated_files.append({
