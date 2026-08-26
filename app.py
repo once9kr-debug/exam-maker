@@ -4,6 +4,11 @@ import google.generativeai as genai
 import json
 import os
 import time
+import PyPDF2
+import docx
+from docx.shared import Pt, Inches
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+from io import BytesIO
 
 # ==========================================
 # 페이지 기본 설정 (Wide 모드)
@@ -11,7 +16,7 @@ import time
 st.set_page_config(page_title="SDH ACADEMY 통합 출제 플랫폼", layout="wide")
 
 # ==========================================
-# 🎨 커스텀 CSS (디테일 6번: 양쪽 정렬 해제 및 박스 디자인 수정)
+# 🎨 커스텀 CSS (평가원 모의고사 극강 렌더링)
 # ==========================================
 st.markdown("""
 <style>
@@ -23,7 +28,67 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 로컬 영구 DB 및 💥스마트 캐시 엔진 연동
+# 워드(.docx) 파일 생성 엔진
+# ==========================================
+def create_word_file(problems_list, header_title):
+    doc = docx.Document()
+    
+    # 평가원 스타일 여백 최소화 설정
+    for section in doc.sections:
+        section.top_margin = Inches(0.5)
+        section.bottom_margin = Inches(0.5)
+        section.left_margin = Inches(0.6)
+        section.right_margin = Inches(0.6)
+
+    title = doc.add_heading(header_title, level=1)
+    title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+    for idx, data in enumerate(problems_list):
+        q_title_text = data.get('question', '문제 누락').split('.', 1)[-1].strip() if '.' in data.get('question', '') else data.get('question', '')
+        q_title = f"{idx+1}. {q_title_text}"
+        p_q = doc.add_paragraph()
+        p_q.add_run(q_title).bold = True
+
+        passage_raw = data.get("passage", "").replace("<br/>", "\n").replace("<br>", "\n")
+        
+        # 주어진 문장 박스 처리
+        if "[박스]" in passage_raw and "[/박스]" in passage_raw:
+            try:
+                inserted_box = passage_raw.split("[박스]")[1].split("[/박스]")[0]
+                main_passage = passage_raw.split("[/박스]")[1].strip()
+
+                p_box = doc.add_paragraph()
+                p_box.add_run(f"[{inserted_box}]").italic = True
+                p_box.paragraph_format.left_indent = Inches(0.2)
+                p_box.paragraph_format.right_indent = Inches(0.2)
+
+                doc.add_paragraph(main_passage)
+            except:
+                doc.add_paragraph(passage_raw)
+        else:
+            doc.add_paragraph(passage_raw)
+
+        options = data.get("options", [])
+        if options:
+            doc.add_paragraph("  ".join(options))
+        doc.add_paragraph("")
+
+    # 정답 및 해설 섹션
+    doc.add_page_break()
+    doc.add_heading("정답 및 해설", level=1)
+    for idx, data in enumerate(problems_list):
+        p_ans = doc.add_paragraph()
+        p_ans.add_run(f"{idx+1}번 - {data.get('answer', '')}").bold = True
+        doc.add_paragraph(f"[해설] {data.get('explanation', '')}")
+        doc.add_paragraph("")
+
+    buffer = BytesIO()
+    doc.save(buffer)
+    buffer.seek(0)
+    return buffer
+
+# ==========================================
+# 로컬 영구 DB 및 스마트 캐시 연동
 # ==========================================
 DB_FILE = "sdh_passages_db.json"
 CACHE_FILE = "sdh_problems_cache_db.json"
@@ -55,9 +120,6 @@ def toggle_all_types():
 def toggle_all_q():
     for i in range(18, 46): st.session_state[f"q_{i}"] = st.session_state.q_all
 
-# ==========================================
-# API 세팅
-# ==========================================
 if "GEMINI_API_KEY" in st.secrets:
     genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
 else:
@@ -70,7 +132,7 @@ st.markdown("---")
 tab_search, tab_db, tab_exam = st.tabs(["🔍 모의고사 검색", "🗂️ 지문 DB 관리", "🎯 세부 변형문제 제작"])
 
 # ------------------------------------------
-# 탭 1 & 탭 2 (DB 관리 - 기존과 동일)
+# 탭 1 & 탭 2 (DB 관리 유지)
 # ------------------------------------------
 with tab_search:
     st.markdown("<div class='group-header'>📚 모의고사 DB 검색</div>", unsafe_allow_html=True)
@@ -86,7 +148,6 @@ with tab_db:
     exam_key = f"{exam_year}_{exam_month}_{exam_grade}"
     if exam_key not in st.session_state.passage_db: st.session_state.passage_db[exam_key] = {}
 
-    import PyPDF2
     st.markdown("### 🚀 방법 1. 문제지 & 정답지 PDF 동시 업로드")
     pdf_col1, pdf_col2 = st.columns(2)
     with pdf_col1: uploaded_q_pdf = st.file_uploader("📝 문제지 PDF 업로드", type=["pdf"])
@@ -113,8 +174,6 @@ with tab_db:
 # ------------------------------------------
 with tab_exam:
     st.markdown(f"##### 📝 출제 대상: **{exam_year} {exam_month}, {exam_grade} 모의고사**")
-    
-    st.markdown("<div class='group-header'>📌 1. 출제할 세부 유형 선택</div>", unsafe_allow_html=True)
     st.checkbox("✅ 전체 유형 선택", key="type_all", on_change=toggle_all_types)
     
     cat1, cat2, cat3, cat4 = st.columns(4)
@@ -132,7 +191,6 @@ with tab_exam:
         t_essay = st.checkbox("서술형 영작", key="t_essay"); t_match = st.checkbox("내용 일치/불일치", key="t_match")
 
     st.markdown("---")
-    st.markdown("<div class='group-header'>📖 2. 모의고사 지문(번호) 선택</div>", unsafe_allow_html=True)
     st.checkbox("✅ 전체 지문 선택", key="q_all", on_change=toggle_all_q)
     
     q_cols = st.columns(10)
@@ -140,7 +198,6 @@ with tab_exam:
         with q_cols[i % 10]: st.checkbox(f"{q_num}번", key=f"q_{q_num}")
 
     st.markdown("---")
-    st.markdown("<div class='group-header'>⚙️ 3. 분할 출제 설정 및 대기열 생성</div>", unsafe_allow_html=True)
     split_size = st.number_input("파일 1개당 출제할 문제 수 (기본: 150)", min_value=10, max_value=500, value=150, step=10)
     
     if st.button("🛒 1단계: 출제 대기열(Queue) 생성하기", type="secondary", use_container_width=True):
@@ -179,16 +236,29 @@ with tab_exam:
         remain_tasks = len(st.session_state.exam_queue)
         st.markdown(f"<div class='status-box'><b>📊 현재 출제 현황:</b> 총 {st.session_state.total_tasks}문제 중 <b>{remain_tasks}문제 남음</b></div>", unsafe_allow_html=True)
         
+        # 💥 워드와 HTML 동시 다운로드 지원
         if st.session_state.generated_files:
             st.markdown("### 📥 완성된 시험지 다운로드")
             for file_info in st.session_state.generated_files:
-                st.download_button(
-                    label=f"💾 Part {file_info['part']} 다운로드 ({file_info['count']}문제)", 
-                    data=file_info['html'], 
-                    file_name=f"SDH_Premium_Part_{file_info['part']}.html", 
-                    mime="text/html",
-                    key=f"dl_{file_info['part']}"
-                )
+                dl_col1, dl_col2 = st.columns(2)
+                with dl_col1:
+                    st.download_button(
+                        label=f"🌐 Part {file_info['part']} 인쇄용 HTML 다운로드", 
+                        data=file_info['html'], 
+                        file_name=f"SDH_Premium_Part_{file_info['part']}.html", 
+                        mime="text/html",
+                        key=f"dl_html_{file_info['part']}",
+                        use_container_width=True
+                    )
+                with dl_col2:
+                    st.download_button(
+                        label=f"📝 Part {file_info['part']} 편집용 Word 다운로드", 
+                        data=file_info['word'], 
+                        file_name=f"SDH_Premium_Part_{file_info['part']}.docx", 
+                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                        key=f"dl_word_{file_info['part']}",
+                        use_container_width=True
+                    )
             st.markdown("---")
         
         if remain_tasks > 0:
@@ -198,7 +268,6 @@ with tab_exam:
                 current_batch = st.session_state.exam_queue[:target_amount]
                 exam_key = f"{exam_year}_{exam_month}_{exam_grade}"
                 
-                # 💥 스마트 캐시 분류
                 cached_results = {}
                 tasks_to_generate = []
                 
@@ -227,13 +296,12 @@ with tab_exam:
                             passage_text = st.session_state.passage_db[exam_key][task['q_num']]
                             prompt += f"요청 {idx+1}. 지문 번호: {task['q_num']}, 출제해야 할 문제 유형: {task['q_type']}\n원문: {passage_text}\n\n"
                             
-                        # 💥 디테일 수정 프롬프트 주입
                         prompt += """[💥 디테일 출력 규칙 - 매우 엄격함 💥]
 1. 부연 설명이나 마크다운(```json 등) 없이 순수 JSON 배열만 출력하세요.
 2. 키: "question", "passage", "options", "answer", "explanation"
 3. 글의 순서 문제: options에 반드시 ['① (A) - (C) - (B)', '② (B) - (A) - (C)', ...] 형태로 원문자 기호를 포함하세요.
 4. 어법/어휘/문장삽입 문제: 지문(passage) 안에 밑줄이나 번호(①, ②)가 이미 포함된 경우, options는 반드시 빈 리스트 [] 를 반환하여 중복을 방지하세요.
-5. 서술형 영작 문제: <조건> 텍스트는 문제 발문(question)에 넣지 말고, 지문(passage) 텍스트 맨 마지막에 줄바꿈(<br/><br/>) 후 자연스럽게 추가하세요.
+5. 서술형 영작 문제: <조건> 텍스트는 발문(question)에 넣지 말고, 지문(passage) 텍스트 맨 마지막에 줄바꿈(<br/><br/>) 후 추가하세요.
 6. 문장 삽입 문제: 주어진 문장은 반드시 [박스]주어진 문장[/박스] 형태로 지문 맨 앞에 표기하세요.
 """
                         try:
@@ -241,31 +309,27 @@ with tab_exam:
                             raw_text = response.text.strip().replace("```json", "").replace("```", "").strip()
                             chunk_problems = json.loads(raw_text)
                             
-                            # 캐시에 저장
                             for idx, task in enumerate(chunk):
                                 if idx < len(chunk_problems):
                                     cache_key = f"{exam_key}_{task['q_num']}_{task['q_type']}"
                                     st.session_state.problem_cache[cache_key] = chunk_problems[idx]
                                     cached_results[cache_key] = chunk_problems[idx]
-                                    
                         except Exception as e:
-                            st.error(f"일부 구간 오류 발생 (건너뜀): {e}")
                             time.sleep(1)
                             
                         progress_bar.progress(current_chunk_idx / total_chunks)
                     
                     save_json(CACHE_FILE, st.session_state.problem_cache)
                 
-                status_text.text(f"✅ Part {st.session_state.part_counter} 출제 완료! HTML 렌더링 중...")
+                status_text.text(f"✅ Part {st.session_state.part_counter} 출제 완료! 시험지 렌더링 중...")
                 
-                # 순서대로 다시 조립
                 all_generated_problems = []
                 for task in current_batch:
                     cache_key = f"{exam_key}_{task['q_num']}_{task['q_type']}"
                     if cache_key in cached_results:
                         all_generated_problems.append(cached_results[cache_key])
                 
-                # HTML 조립
+                # 💥 1. 극강의 평가원 스타일 CSS HTML 조립
                 questions_html = ""
                 answers_html = ""
                 
@@ -273,12 +337,10 @@ with tab_exam:
                     q_title = f"{idx+1}. {data.get('question', '문제 누락').split('.', 1)[-1].strip() if '.' in data.get('question', '') else data.get('question', '')}"
                     passage_raw = data.get("passage", "")
                     
-                    # 💥 디테일 수정: 주어진 문장 박스 위치 변경
                     if "[박스]" in passage_raw and "[/박스]" in passage_raw:
                         inserted_box = passage_raw.split("[박스]")[1].split("[/박스]")[0]
                         main_passage = passage_raw.split("[/박스]")[1].strip()
-                        passage_html = f'<div class="inserted-box">{inserted_box}</div>'
-                        passage_html += f'<div class="passage-box">{main_passage}</div>'
+                        passage_html = f'<div class="inserted-box">{inserted_box}</div><div class="passage-box">{main_passage}</div>'
                     else:
                         passage_html = f'<div class="passage-box">{passage_raw}</div>'
                     
@@ -289,40 +351,46 @@ with tab_exam:
                         for opt in options: options_html += f'<div class="option-item">{opt}</div>'
                         options_html += '</div>'
                         
+                    # page-break-inside 적용
                     questions_html += f'<div class="question-block"><div class="question-title">{q_title}</div>{passage_html}{options_html}</div>'
                     answers_html += f'<div class="answer-block"><b>{idx+1}번 - {data.get("answer", "")}</b><br/><b>[해설]</b> {data.get("explanation", "")}</div>'
 
                 header_title = f"{exam_year} {exam_month} {exam_grade} 모의고사 변형문제 (Part {st.session_state.part_counter})"
                 
-                # 💥 디테일 수정: text-align: left 적용
                 html_content = f'''
                 <!DOCTYPE html><html lang="ko"><head><meta charset="utf-8"><title>{header_title}</title>
                 <style>
                     @import url('[https://fonts.googleapis.com/css2?family=Nanum+Myeongjo:wght@400;700&display=swap](https://fonts.googleapis.com/css2?family=Nanum+Myeongjo:wght@400;700&display=swap)');
                     @import url('[https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@700&display=swap](https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@700&display=swap)');
-                    body {{ font-family: 'Nanum Myeongjo', serif; font-size: 9.5pt; line-height: 1.4; color: #000; max-width: 210mm; margin: 0 auto; padding: 20px; }}
-                    .header-container {{ font-family: 'Noto Sans KR', sans-serif; display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 2px solid #000; padding-bottom: 8px; margin-bottom: 15px; }}
+                    body {{ font-family: 'Nanum Myeongjo', serif; font-size: 9.8pt; letter-spacing: -0.3px; line-height: 1.35; color: #000; max-width: 210mm; margin: 0 auto; padding: 20px; }}
+                    .header-container {{ font-family: 'Noto Sans KR', sans-serif; display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 2px solid #000; padding-bottom: 8px; margin-bottom: 20px; }}
                     .header-title {{ font-size: 14pt; font-weight: bold; }}
                     .header-sub {{ font-size: 8.5pt; color: #555; }}
                     .two-column-layout {{ column-count: 2; column-gap: 25px; column-fill: auto; }}
-                    .question-block {{ break-inside: avoid; page-break-inside: avoid; margin-bottom: 25px; text-align: justify; word-break: keep-all; }}
-                    .question-title {{ font-family: 'Noto Sans KR', sans-serif; font-size: 10pt; font-weight: bold; margin-bottom: 4px; }}
-                    .passage-box {{ border: 1.1px solid #000; padding: 5px 8px; margin: 3px 0; background-color: #fff; text-align: left; word-break: keep-all; overflow-wrap: break-word; line-height: 1.5; }}
+                    /* 문제 블록 인쇄 잘림 완벽 방지 */
+                    .question-block {{ break-inside: avoid; page-break-inside: avoid; margin-bottom: 30px; text-align: left; word-break: keep-all; }}
+                    .question-title {{ font-family: 'Noto Sans KR', sans-serif; font-size: 10.5pt; font-weight: bold; margin-bottom: 5px; }}
+                    .passage-box {{ border: 1.2px solid #000; padding: 8px 10px; margin: 5px 0; background-color: #fff; text-align: left; word-break: keep-all; overflow-wrap: break-word; }}
                     .inserted-box {{ border: 1.5px solid #555; padding: 7px; margin-bottom: 8px; text-align: left; background-color: #f9f9f9; }}
-                    .options-container {{ margin-top: 4px; }} .option-item {{ display: inline-block; margin-right: 15px; margin-bottom: 3px; }}
+                    .options-container {{ margin-top: 8px; }} .option-item {{ display: inline-block; margin-right: 15px; margin-bottom: 4px; }}
                     .answers-section {{ break-before: page; page-break-before: always; margin-top: 30px; }}
                     .section-title {{ font-family: 'Noto Sans KR', sans-serif; font-size: 13pt; font-weight: bold; text-align: center; border-bottom: 1px solid #000; padding-bottom: 8px; margin-bottom: 20px; }}
-                    .answer-block {{ break-inside: avoid; page-break-inside: avoid; margin-bottom: 15px; text-align: justify; word-break: keep-all; }}
+                    .answer-block {{ break-inside: avoid; page-break-inside: avoid; margin-bottom: 15px; text-align: left; word-break: keep-all; }}
+                    @media print {{ @page {{ margin: 12mm; }} body {{ padding: 0; }} }}
                 </style></head><body>
-                <div class="header-container"><div class="header-title">{header_title}</div><div class="header-sub">SDH ACADEMY & Internal Exam System</div></div>
+                <div class="header-container"><div class="header-title">{header_title}</div><div class="header-sub">SDH Premium Decoding</div></div>
                 <div class="two-column-layout">{questions_html}</div>
                 <div class="answers-section"><div class="section-title">정답 및 해설</div><div class="two-column-layout">{answers_html}</div></div>
                 </body></html>'''
                 
+                # 💥 2. Word(.docx) 파일 엔진 가동
+                word_buffer = create_word_file(all_generated_problems, header_title)
+                
                 st.session_state.generated_files.append({
                     "part": st.session_state.part_counter,
                     "count": len(all_generated_problems),
-                    "html": html_content
+                    "html": html_content,
+                    "word": word_buffer.getvalue()
                 })
                 
                 st.session_state.exam_queue = st.session_state.exam_queue[target_amount:]
