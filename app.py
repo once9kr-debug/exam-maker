@@ -35,8 +35,8 @@ st.markdown("""
 # ==========================================
 DB_FILE = "sdh_passages_db.json"
 CACHE_FILE = "sdh_problems_cache_db.json"
-HISTORY_DB_FILE = "sdh_history_db.json"    # 💥 출제 이력 누적 DB
-PATTERN_DB_FILE = "sdh_patterns_db.json"   # 💥 학교 기출 패턴 DB
+HISTORY_DB_FILE = "sdh_history_db.json"
+PATTERN_DB_FILE = "sdh_patterns_db.json"
 
 def load_json(filepath):
     if os.path.exists(filepath):
@@ -160,14 +160,12 @@ def process_chunk(chunk, exam_key, passage_db, history_db, pattern_db, model):
         passage_text = passage_db[exam_key][task['q_num']]
         prompt += f"요청 {idx+1}. 지문(이름): {task['q_num']}, 세부유형: {task['q_type']}, 출제형태: {task['q_format']}\n"
         
-        # 💥 무한 출제 엔진 (히스토리 회피 로직) 💥
         if task.get('exclude_history', False):
             hist_list = history_db.get(exam_key, {}).get(f"{task['q_num']}_{task['q_type']}", [])
             if hist_list:
-                hist_str = "\n".join(hist_list[-3:]) # 최근 3개까지만 회피 (컨텍스트 오버 방지)
+                hist_str = "\n".join(hist_list[-3:])
                 prompt += f"🚨 [출제 회피 명령]: 이 지문으로 과거에 출제했던 문제들의 정답 포인트입니다.\n{hist_str}\n이번에는 위 포인트들과 겹치지 않게 완전히 다른 문장이나 다른 각도에서 새로운 문제를 창조하세요!\n"
         
-        # 💥 기출 패턴 랜덤 믹스 로직 💥
         if task['q_type'] in pattern_db and pattern_db[task['q_type']]:
             random_pattern = random.choice(pattern_db[task['q_type']])
             prompt += f"🏫 [적용할 학교 기출 패턴]: '{random_pattern}'\n이 패턴의 발문 스타일과 출제 방식을 적극 모방하여 문제를 만드세요.\n"
@@ -206,7 +204,6 @@ def process_chunk(chunk, exam_key, passage_db, history_db, pattern_db, model):
                     is_ok, msg = rule_based_check(chunk[idx]['q_type'], prob)
                     if not is_ok: raise ValueError(msg)
                     
-                    # 파이썬 진공청소기 (오류 교정)
                     q_text = prob.get("question", "")
                     match_q = re.search(r'\[요약문\]|<요약문>|【요약문】', q_text)
                     if match_q:
@@ -230,7 +227,6 @@ def process_chunk(chunk, exam_key, passage_db, history_db, pattern_db, model):
         except Exception as e: time.sleep(2.0)
         
     return chunk, [{"question": "[⚠️검수 실패] 수동 확인 요망", "passage": "AI 생성 중 오류가 발생했습니다.", "condition": "", "post_text": "", "options": [], "answer": "1", "explanation": "재시도 요망"} for _ in chunk], False
-
 
 def toggle_all_types():
     keys = ["t_purpose", "t_mood", "t_claim", "t_main_idea", "t_topic", "t_title", "t_match", 
@@ -351,7 +347,6 @@ elif st.session_state.page == 'main':
                 for i, q_num in enumerate(sorted_db_keys):
                     with q_cols[i % 5]: st.checkbox(f"{q_num}", key=f"q_{q_num}")
 
-            # 💥 50차 핵심: 다이내믹 정렬 기준 & 이전 출제 문제 제외(무한 엔진) 💥
             st.markdown("---")
             st.markdown("<div class='group-header'>⚙️ 4. 출제 방식 및 대기열 생성</div>", unsafe_allow_html=True)
             
@@ -387,7 +382,6 @@ elif st.session_state.page == 'main':
                     st.warning("유형과 지문을 최소 1개 이상 선택해주세요.")
                 else:
                     new_queue = []
-                    # 💥 정렬 기준에 따른 큐 배열 순서 스위칭 로직 💥
                     if "지문 순서" in sort_order:
                         for q in selected_q_nums:
                             for t in selected_types_list:
@@ -424,7 +418,6 @@ elif st.session_state.page == 'main':
                         cached_results = {}
                         tasks_to_process = []
                         for task in current_batch:
-                            # exclude_history가 True면 캐시 무시하고 무조건 새로 생성
                             cache_key = f"v4_{exam_key}_{task['q_num']}_{task['q_type']}_{task['q_format']}"
                             if not task['exclude_history'] and cache_key in st.session_state.problem_cache: 
                                 cached_results[cache_key] = st.session_state.problem_cache[cache_key]
@@ -451,12 +444,10 @@ elif st.session_state.page == 'main':
                                             st.session_state.problem_cache[cache_key] = prob_result
                                             cached_results[cache_key] = prob_result
                                             
-                                            # 💥 출제 이력(History) 기록 저장 로직 💥
                                             if success:
                                                 hist_key = f"{task['q_num']}_{task['q_type']}"
                                                 if exam_key not in st.session_state.history_db: st.session_state.history_db[exam_key] = {}
                                                 if hist_key not in st.session_state.history_db[exam_key]: st.session_state.history_db[exam_key][hist_key] = []
-                                                # 문제의 핵심 포인트(질문+정답)를 기록하여 다음 출제 때 피하도록 함
                                                 point_record = f"질문: {prob_result.get('question','')} / 정답: {prob_result.get('answer','')}"
                                                 st.session_state.history_db[exam_key][hist_key].append(point_record)
                                                 
@@ -465,7 +456,7 @@ elif st.session_state.page == 'main':
                                     progress_bar.progress(progress)
                                     status_text.text(f"⚡ 초고속 병렬 출제 중... (총 {total_chunks}구간 중 {completed_chunks}구간 완료)")
                             save_json(CACHE_FILE, st.session_state.problem_cache)
-                            save_json(HISTORY_DB_FILE, st.session_state.history_db) # 히스토리 저장
+                            save_json(HISTORY_DB_FILE, st.session_state.history_db)
                         
                         status_text.text(f"✅ Part {st.session_state.part_counter} 초고속 출제 완료! 렌더링 중...")
                         all_generated_problems = [cached_results[f"v4_{exam_key}_{task['q_num']}_{task['q_type']}_{task['q_format']}"] for task in current_batch if f"v4_{exam_key}_{task['q_num']}_{task['q_type']}_{task['q_format']}" in cached_results]
@@ -613,7 +604,7 @@ elif st.session_state.page == 'main':
                             except json.JSONDecodeError: st.error("🚨 텍스트를 읽지 못했습니다. PDF로 다시 업로드해 주세요.")
                         except Exception as e: st.error(f"서버 오류: {e}")
 
-        # 💥 50차 핵심: 전국 기출 패턴 무한 학습소 UI 💥
+        # 💥 전국 기출 패턴 무한 학습소 UI 💥
         st.markdown("---")
         st.markdown("<div class='pattern-box'><b>🏫 전국 기출 패턴 무한 학습소 (거푸집 추출기)</b><br>타 지역 학교 기출문제를 대량으로 올려, 다양한 서술형/객관식 문제의 스타일(템플릿)을 시스템에 학습시킵니다.</div>", unsafe_allow_html=True)
         
@@ -639,11 +630,10 @@ elif st.session_state.page == 'main':
 {{
   "주제": ["스타일1(예: 속담으로 고르기)", "스타일2"],
   "어법": ["스타일1(예: 틀린 개수 고르기)"],
-  "요약": ["스타일1(조건: 10단어, 빈칸 배열)"],
-  "서술형": ["스타일1(조건: 문장부호 포함 등)"]
+  "요약": ["스타일1(조건: 10단어, 빈칸 배열)"]
 }}
 [기출문제 원문]
-{raw_text[:8000]} # 토큰 초과 방지 
+{raw_text[:8000]}
 """
                         try:
                             response = model.generate_content(prompt)
@@ -654,16 +644,33 @@ elif st.session_state.page == 'main':
                                 for q_type, style_list in patterns.items():
                                     if q_type not in st.session_state.pattern_db: st.session_state.pattern_db[q_type] = []
                                     st.session_state.pattern_db[q_type].extend(style_list)
-                                    # 중복 제거
                                     st.session_state.pattern_db[q_type] = list(set(st.session_state.pattern_db[q_type]))
                                 extracted_count += 1
                         except Exception as e:
-                            continue # 일부 파일 실패해도 무시하고 다음 진행
+                            continue 
                             
                     save_json(PATTERN_DB_FILE, st.session_state.pattern_db)
                     st.session_state.pattern_upload_msg = f"🎉 총 {extracted_count}개의 기출 파일에서 새로운 출제 패턴을 학습하여 DB에 누적했습니다!"
                     st.session_state.file_key += 1
                     st.rerun()
+
+        # 💥 51차 핵심: 기출 패턴 실시간 모니터링 대시보드 장착 💥
+        st.markdown("#### 🧠 학습된 기출 패턴 DB 현황")
+        if not st.session_state.pattern_db:
+            st.info("아직 학습된 기출 패턴이 없습니다. 위에서 기출문제 PDF를 업로드하여 AI에게 학습시켜 주세요!")
+        else:
+            total_patterns = sum(len(v) for v in st.session_state.pattern_db.values())
+            st.write(f"**총 {total_patterns}개의 다이내믹 출제 패턴(거푸집)이 장착되어 있습니다.**")
+            
+            for q_type, patterns in st.session_state.pattern_db.items():
+                if patterns:
+                    with st.expander(f"📌 {q_type} 패턴 ({len(patterns)}개)"):
+                        for i, p in enumerate(patterns):
+                            st.write(f"{i+1}. {p}")
+                        if st.button(f"🗑️ {q_type} 패턴 전체 초기화", key=f"del_pat_{q_type}"):
+                            st.session_state.pattern_db[q_type] = []
+                            save_json(PATTERN_DB_FILE, st.session_state.pattern_db)
+                            st.rerun()
 
         st.markdown("---")
         st.markdown("### 📊 현재 구축된 지문 DB 현황")
