@@ -12,6 +12,7 @@ from io import BytesIO
 import concurrent.futures
 import olefile
 import re
+import random
 
 # ==========================================
 # 페이지 기본 설정
@@ -23,14 +24,33 @@ st.markdown("""
     .group-header { font-weight: 700; font-size: 1.1rem; color: #2C3E50; border-bottom: 2px solid #3498DB; padding-bottom: 8px; margin-top: 20px; margin-bottom: 15px; }
     div[data-testid="stCheckbox"] label span { font-size: 0.95rem; }
     .status-box { background-color: #E8F8F5; border-left: 5px solid #1ABC9C; padding: 15px; margin: 10px 0; border-radius: 5px; }
+    .pattern-box { background-color: #FEF9E7; border-left: 5px solid #F1C40F; padding: 15px; margin: 10px 0; border-radius: 5px; }
     .login-box { max-width: 400px; margin: 0 auto; padding-top: 100px; }
     div.row-widget.stRadio > div { flex-direction: row; }
 </style>
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 세션 상태 및 페이지 라우팅
+# DB 파일 및 세션 상태 설정
 # ==========================================
+DB_FILE = "sdh_passages_db.json"
+CACHE_FILE = "sdh_problems_cache_db.json"
+HISTORY_DB_FILE = "sdh_history_db.json"    # 💥 출제 이력 누적 DB
+PATTERN_DB_FILE = "sdh_patterns_db.json"   # 💥 학교 기출 패턴 DB
+
+def load_json(filepath):
+    if os.path.exists(filepath):
+        with open(filepath, "r", encoding="utf-8") as f: return json.load(f)
+    return {}
+
+def save_json(filepath, data):
+    with open(filepath, "w", encoding="utf-8") as f: json.dump(data, f, ensure_ascii=False, indent=4)
+
+if 'passage_db' not in st.session_state: st.session_state.passage_db = load_json(DB_FILE)
+if 'problem_cache' not in st.session_state: st.session_state.problem_cache = load_json(CACHE_FILE)
+if 'history_db' not in st.session_state: st.session_state.history_db = load_json(HISTORY_DB_FILE)
+if 'pattern_db' not in st.session_state: st.session_state.pattern_db = load_json(PATTERN_DB_FILE)
+
 if 'page' not in st.session_state: st.session_state.page = 'login'
 if 'role' not in st.session_state: st.session_state.role = None
 if 'current_menu' not in st.session_state: st.session_state.current_menu = "🎯 변형문제 제작"
@@ -48,6 +68,7 @@ if 'total_tasks' not in st.session_state: st.session_state.total_tasks = 0
 
 if 'file_key' not in st.session_state: st.session_state.file_key = 0
 if 'upload_msg' not in st.session_state: st.session_state.upload_msg = ""
+if 'pattern_upload_msg' not in st.session_state: st.session_state.pattern_upload_msg = ""
 
 YEARS_LIST = ["2026년", "2025년", "2024년", "2023년", "2022년", "2021년", "2020년", "2019년", "2018년", "2017년", "2016년", "2015년"]
 MONTHS_LIST = ["3월", "4월", "5월", "6월", "7월", "10월", "11월", "12월"]
@@ -85,16 +106,12 @@ def create_word_file(problems_list, header_title):
         section.left_margin = Inches(0.6); section.right_margin = Inches(0.6)
     title = doc.add_heading(header_title, level=1); title.alignment = WD_ALIGN_PARAGRAPH.CENTER
     for idx, data in enumerate(problems_list):
-        
         q_raw = data.get('question', '').strip()
         if not q_raw: q_raw = "다음 글을 읽고, 조건에 맞게 물음에 답하시오."
-        if '.' in q_raw and q_raw.split('.')[0].isdigit():
-            q_title_text = q_raw.split('.', 1)[-1].strip()
-        else:
-            q_title_text = q_raw
+        if '.' in q_raw and q_raw.split('.')[0].isdigit(): q_title_text = q_raw.split('.', 1)[-1].strip()
+        else: q_title_text = q_raw
             
-        p_q = doc.add_paragraph()
-        p_q.add_run(f"{idx+1}. {q_title_text}").bold = True
+        p_q = doc.add_paragraph(); p_q.add_run(f"{idx+1}. {q_title_text}").bold = True
         
         passage_raw = data.get("passage", "").replace("<br/>", "\n").replace("<br>", "\n")
         if "[박스]" in passage_raw and "[/박스]" in passage_raw:
@@ -111,19 +128,13 @@ def create_word_file(problems_list, header_title):
         if condition_raw:
             condition_clean = condition_raw.replace("<조건>", "").replace("</조건>", "").strip()
             p_cond = doc.add_paragraph()
-            p_cond.paragraph_format.space_before = Pt(5)
-            p_cond.paragraph_format.space_after = Pt(5)
-            p_cond.paragraph_format.line_spacing = 1.15
-            p_cond.paragraph_format.left_indent = Inches(0.1)
-            p_cond.add_run("[조건]\n").bold = True
-            p_cond.runs[0].font.size = Pt(9)
+            p_cond.paragraph_format.space_before = Pt(5); p_cond.paragraph_format.space_after = Pt(5); p_cond.paragraph_format.line_spacing = 1.15; p_cond.paragraph_format.left_indent = Inches(0.1)
+            p_cond.add_run("[조건]\n").bold = True; p_cond.runs[0].font.size = Pt(9)
             p_cond.add_run(condition_clean).font.size = Pt(9)
             
         post_text_raw = data.get("post_text", "").strip()
         if post_text_raw:
-            p_post = doc.add_paragraph()
-            p_post.paragraph_format.space_before = Pt(5)
-            p_post.add_run(post_text_raw).bold = True
+            p_post = doc.add_paragraph(); p_post.paragraph_format.space_before = Pt(5); p_post.add_run(post_text_raw).bold = True
         
         options = data.get("options", [])
         if options: doc.add_paragraph("  ".join(options))
@@ -143,39 +154,49 @@ def rule_based_check(task_type, prob_data):
     if task_type == "삽입" and "[박스]" not in passage: return False, "문장 [박스] 누락"
     return True, "통과"
 
-def process_chunk(chunk, exam_key, passage_db, model):
+def process_chunk(chunk, exam_key, passage_db, history_db, pattern_db, model):
     prompt = "당신은 고등학교 내신 영어 출제 전문가입니다. 다음 [출제 목록]에 맞게 출제하세요.\n\n"
     for idx, task in enumerate(chunk):
         passage_text = passage_db[exam_key][task['q_num']]
-        prompt += f"요청 {idx+1}. 지문(이름): {task['q_num']}, 세부유형: {task['q_type']}, 출제형태: {task['q_format']}\n원문: {passage_text}\n\n"
+        prompt += f"요청 {idx+1}. 지문(이름): {task['q_num']}, 세부유형: {task['q_type']}, 출제형태: {task['q_format']}\n"
+        
+        # 💥 무한 출제 엔진 (히스토리 회피 로직) 💥
+        if task.get('exclude_history', False):
+            hist_list = history_db.get(exam_key, {}).get(f"{task['q_num']}_{task['q_type']}", [])
+            if hist_list:
+                hist_str = "\n".join(hist_list[-3:]) # 최근 3개까지만 회피 (컨텍스트 오버 방지)
+                prompt += f"🚨 [출제 회피 명령]: 이 지문으로 과거에 출제했던 문제들의 정답 포인트입니다.\n{hist_str}\n이번에는 위 포인트들과 겹치지 않게 완전히 다른 문장이나 다른 각도에서 새로운 문제를 창조하세요!\n"
+        
+        # 💥 기출 패턴 랜덤 믹스 로직 💥
+        if task['q_type'] in pattern_db and pattern_db[task['q_type']]:
+            random_pattern = random.choice(pattern_db[task['q_type']])
+            prompt += f"🏫 [적용할 학교 기출 패턴]: '{random_pattern}'\n이 패턴의 발문 스타일과 출제 방식을 적극 모방하여 문제를 만드세요.\n"
+            
+        prompt += f"원문: {passage_text}\n\n"
     
     prompt += """[💥 출력 구조 및 자가 검수 규칙 💥]
-반드시 아래의 JSON 배열 형식을 100% 엄격하게 준수하여 출력하세요. 각 방(Key)의 역할을 절대 섞지 마세요.
+반드시 아래의 JSON 배열 형식을 100% 엄격하게 준수하여 출력하세요.
 [
   {
-    "question": "다음 글을 읽고, 조건에 맞게 요약문을 완성하시오. (🚨경고: 여기에 요약문 본체나 조건, 영어를 절대 섞어 적지 마세요. 순수 한국어 지시문만 적습니다.)",
-    "passage": "영어 원문만 들어갑니다. (🚨경고: 여기에 <조건>이나 문제의 일부를 절대 포함하지 마세요.)",
-    "condition": "1. 30자 이내로 쓸 것 2. ~다 로 끝날 것 (제한사항이나 조건이 없으면 빈 문자열 \"\" 로 둡니다.)",
-    "post_text": "[요약문] 요약문 빈칸이나 밑줄 친 문장이 있다면 반드시 여기에 적으세요. 없으면 빈 문자열 \"\" 로 둡니다.",
-    "options": ["①...", "②..."], // 주관식일 경우 반드시 빈 배열 [] 로 둡니다.
+    "question": "다음 글을 읽고, 조건에 맞게 요약문을 완성하시오. (순수 한국어 지시문만)",
+    "passage": "영어 원문만 들어갑니다.",
+    "condition": "1. 30자 이내로 쓸 것 2. ~다 로 끝날 것 (없으면 \"\")",
+    "post_text": "[요약문] 요약문 빈칸이나 밑줄 친 문장이 있다면 반드시 여기에. (없으면 \"\")",
+    "options": ["①...", "②..."], // 주관식일 경우 []
     "answer": "정답",
     "explanation": "해설"
   }
 ]
 [필수] 결과물 출력 전 위 규칙과 구조를 완벽히 지켰는지 자가 검증하세요."""
     
-    # 💥 재시도 횟수 3회로 증가시켜 안정성 확보
     for attempt in range(3): 
         try:
             response = model.generate_content(prompt)
             raw_text = response.text
             
-            # 💥 지능형 JSON 추출기: AI가 앞뒤로 헛소리를 해도 대괄호 배열만 쏙 뽑아냄 💥
             json_match = re.search(r'\[\s*\{.*?\}\s*\]', raw_text, re.DOTALL)
-            if json_match:
-                clean_json_str = json_match.group(0)
-            else:
-                clean_json_str = raw_text.replace("```json", "").replace("```", "").strip()
+            if json_match: clean_json_str = json_match.group(0)
+            else: clean_json_str = raw_text.replace("```json", "").replace("```", "").strip()
                 
             probs = json.loads(clean_json_str)
             valid_probs = []
@@ -185,6 +206,7 @@ def process_chunk(chunk, exam_key, passage_db, model):
                     is_ok, msg = rule_based_check(chunk[idx]['q_type'], prob)
                     if not is_ok: raise ValueError(msg)
                     
+                    # 파이썬 진공청소기 (오류 교정)
                     q_text = prob.get("question", "")
                     match_q = re.search(r'\[요약문\]|<요약문>|【요약문】', q_text)
                     if match_q:
@@ -205,34 +227,10 @@ def process_chunk(chunk, exam_key, passage_db, model):
 
                     valid_probs.append(prob)
             return chunk, valid_probs, True
-        except Exception as e: 
-            time.sleep(2.0) # 💥 에러 시 대기 시간을 늘려 API 과부하 방지
-            
-    return chunk, [{"question": "[⚠️검수 실패] 수동 확인 요망", "passage": "AI 생성 중 오류가 발생했습니다. (API 제한 또는 형식 오류)", "condition": "", "post_text": "", "options": [], "answer": "1", "explanation": "재시도 요망"} for _ in chunk], False
+        except Exception as e: time.sleep(2.0)
+        
+    return chunk, [{"question": "[⚠️검수 실패] 수동 확인 요망", "passage": "AI 생성 중 오류가 발생했습니다.", "condition": "", "post_text": "", "options": [], "answer": "1", "explanation": "재시도 요망"} for _ in chunk], False
 
-DB_FILE = "sdh_passages_db.json"
-CACHE_FILE = "sdh_problems_cache_db.json"
-
-def load_json(filepath):
-    if os.path.exists(filepath):
-        with open(filepath, "r", encoding="utf-8") as f: return json.load(f)
-    return {}
-
-def save_json(filepath, data):
-    with open(filepath, "w", encoding="utf-8") as f: json.dump(data, f, ensure_ascii=False, indent=4)
-
-if 'passage_db' not in st.session_state: st.session_state.passage_db = load_json(DB_FILE)
-if 'problem_cache' not in st.session_state: st.session_state.problem_cache = load_json(CACHE_FILE)
-
-migrated = False
-old_keys = list(st.session_state.passage_db.keys())
-for k in old_keys:
-    parts = k.split('_')
-    if len(parts) == 3: 
-        new_key = f"고등 모의고사_{parts[0]}_{parts[1]}_{parts[2]}"
-        st.session_state.passage_db[new_key] = st.session_state.passage_db.pop(k)
-        migrated = True
-if migrated: save_json(DB_FILE, st.session_state.passage_db)
 
 def toggle_all_types():
     keys = ["t_purpose", "t_mood", "t_claim", "t_main_idea", "t_topic", "t_title", "t_match", 
@@ -317,10 +315,8 @@ elif st.session_state.page == 'main':
         exam_key = f"{st.session_state.sel_type}_{st.session_state.sel_year}_{st.session_state.sel_month}_{st.session_state.sel_grade}"
         
         if st.session_state.show_generator:
-            if st.session_state.sel_type in ["외부지문", "고등 교과서"]:
-                title_disp = f"**{st.session_state.sel_type}, {st.session_state.sel_grade}**"
-            else:
-                title_disp = f"**{st.session_state.sel_type} {st.session_state.sel_year} {st.session_state.sel_month}, {st.session_state.sel_grade}**"
+            if st.session_state.sel_type in ["외부지문", "고등 교과서"]: title_disp = f"**{st.session_state.sel_type}, {st.session_state.sel_grade}**"
+            else: title_disp = f"**{st.session_state.sel_type} {st.session_state.sel_year} {st.session_state.sel_month}, {st.session_state.sel_grade}**"
                 
             st.markdown(f"##### 📌 출제 대상: {title_disp}")
             
@@ -355,8 +351,18 @@ elif st.session_state.page == 'main':
                 for i, q_num in enumerate(sorted_db_keys):
                     with q_cols[i % 5]: st.checkbox(f"{q_num}", key=f"q_{q_num}")
 
+            # 💥 50차 핵심: 다이내믹 정렬 기준 & 이전 출제 문제 제외(무한 엔진) 💥
             st.markdown("---")
-            st.markdown("<div class='group-header'>⚙️ 4. 분할 출제 설정 및 대기열 생성</div>", unsafe_allow_html=True)
+            st.markdown("<div class='group-header'>⚙️ 4. 출제 방식 및 대기열 생성</div>", unsafe_allow_html=True)
+            
+            queue_col1, queue_col2 = st.columns(2)
+            with queue_col1:
+                sort_order = st.radio("🔄 출제 정렬 기준", ["지문 순서대로 (예: 18번 지문으로 모든 유형 출제 후 19번으로)", "문제 유형 순서대로 (예: 전체 지문의 주제 유형 출제 후 어법으로)"])
+            with queue_col2:
+                st.write("♾️ 무한 변형 출제 옵션")
+                exclude_history = st.checkbox("☑️ 이전에 출제한 문제 제외 (새로운 함정/빈칸 창조)")
+            
+            st.write("")
             split_size = st.number_input("파일 1개당 출제할 문제 수 (기본: 150)", min_value=10, max_value=500, value=150, step=10)
             
             if st.button("🛒 1단계: 출제 대기열(Queue) 생성하기", type="secondary", use_container_width=True):
@@ -380,7 +386,17 @@ elif st.session_state.page == 'main':
                 if not selected_types_list or not selected_q_nums:
                     st.warning("유형과 지문을 최소 1개 이상 선택해주세요.")
                 else:
-                    new_queue = [{"q_num": q, "q_type": t, "q_format": exam_format} for q in selected_q_nums for t in selected_types_list]
+                    new_queue = []
+                    # 💥 정렬 기준에 따른 큐 배열 순서 스위칭 로직 💥
+                    if "지문 순서" in sort_order:
+                        for q in selected_q_nums:
+                            for t in selected_types_list:
+                                new_queue.append({"q_num": q, "q_type": t, "q_format": exam_format, "exclude_history": exclude_history})
+                    else:
+                        for t in selected_types_list:
+                            for q in selected_q_nums:
+                                new_queue.append({"q_num": q, "q_type": t, "q_format": exam_format, "exclude_history": exclude_history})
+                                
                     st.session_state.exam_queue = new_queue
                     st.session_state.total_tasks = len(new_queue)
                     st.session_state.generated_files = [] 
@@ -408,38 +424,51 @@ elif st.session_state.page == 'main':
                         cached_results = {}
                         tasks_to_process = []
                         for task in current_batch:
-                            # 💥 캐시 키 v3 로 업데이트: 이전의 불량 문제들을 싹 잊고 무조건 새로 출제! 💥
-                            cache_key = f"v3_{exam_key}_{task['q_num']}_{task['q_type']}_{task['q_format']}"
-                            if cache_key in st.session_state.problem_cache: cached_results[cache_key] = st.session_state.problem_cache[cache_key]
-                            else: tasks_to_process.append(task)
+                            # exclude_history가 True면 캐시 무시하고 무조건 새로 생성
+                            cache_key = f"v4_{exam_key}_{task['q_num']}_{task['q_type']}_{task['q_format']}"
+                            if not task['exclude_history'] and cache_key in st.session_state.problem_cache: 
+                                cached_results[cache_key] = st.session_state.problem_cache[cache_key]
+                            else: 
+                                tasks_to_process.append(task)
                         
                         progress_bar = st.progress(0)
                         status_text = st.empty()
                         model = genai.GenerativeModel('gemini-3.6-flash')
                         
                         if tasks_to_process:
-                            # 💥 API 과부하 차단: 동시 처리 갯수 축소 (4 -> 2)
                             chunk_size = 2 
                             chunks = [tasks_to_process[i:i + chunk_size] for i in range(0, len(tasks_to_process), chunk_size)]
                             total_chunks = len(chunks)
                             completed_chunks = 0
                             with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
-                                future_to_chunk = {executor.submit(process_chunk, c, exam_key, st.session_state.passage_db, model): c for c in chunks}
+                                future_to_chunk = {executor.submit(process_chunk, c, exam_key, st.session_state.passage_db, st.session_state.history_db, st.session_state.pattern_db, model): c for c in chunks}
                                 for future in concurrent.futures.as_completed(future_to_chunk):
                                     chunk_info, probs, success = future.result()
                                     for idx, task in enumerate(chunk_info):
                                         if idx < len(probs):
-                                            cache_key = f"v3_{exam_key}_{task['q_num']}_{task['q_type']}_{task['q_format']}"
-                                            st.session_state.problem_cache[cache_key] = probs[idx]
-                                            cached_results[cache_key] = probs[idx]
+                                            prob_result = probs[idx]
+                                            cache_key = f"v4_{exam_key}_{task['q_num']}_{task['q_type']}_{task['q_format']}"
+                                            st.session_state.problem_cache[cache_key] = prob_result
+                                            cached_results[cache_key] = prob_result
+                                            
+                                            # 💥 출제 이력(History) 기록 저장 로직 💥
+                                            if success:
+                                                hist_key = f"{task['q_num']}_{task['q_type']}"
+                                                if exam_key not in st.session_state.history_db: st.session_state.history_db[exam_key] = {}
+                                                if hist_key not in st.session_state.history_db[exam_key]: st.session_state.history_db[exam_key][hist_key] = []
+                                                # 문제의 핵심 포인트(질문+정답)를 기록하여 다음 출제 때 피하도록 함
+                                                point_record = f"질문: {prob_result.get('question','')} / 정답: {prob_result.get('answer','')}"
+                                                st.session_state.history_db[exam_key][hist_key].append(point_record)
+                                                
                                     completed_chunks += 1
                                     progress = min(1.0, completed_chunks / total_chunks)
                                     progress_bar.progress(progress)
                                     status_text.text(f"⚡ 초고속 병렬 출제 중... (총 {total_chunks}구간 중 {completed_chunks}구간 완료)")
                             save_json(CACHE_FILE, st.session_state.problem_cache)
+                            save_json(HISTORY_DB_FILE, st.session_state.history_db) # 히스토리 저장
                         
                         status_text.text(f"✅ Part {st.session_state.part_counter} 초고속 출제 완료! 렌더링 중...")
-                        all_generated_problems = [cached_results[f"v3_{exam_key}_{task['q_num']}_{task['q_type']}_{task['q_format']}"] for task in current_batch if f"v3_{exam_key}_{task['q_num']}_{task['q_type']}_{task['q_format']}" in cached_results]
+                        all_generated_problems = [cached_results[f"v4_{exam_key}_{task['q_num']}_{task['q_type']}_{task['q_format']}"] for task in current_batch if f"v4_{exam_key}_{task['q_num']}_{task['q_type']}_{task['q_format']}" in cached_results]
                         
                         questions_html = ""
                         answers_html = ""
@@ -447,10 +476,8 @@ elif st.session_state.page == 'main':
                             
                             q_raw = data.get('question', '').strip()
                             if not q_raw: q_raw = "다음 글을 읽고, 조건에 맞게 물음에 답하시오."
-                            if '.' in q_raw and q_raw.split('.')[0].isdigit():
-                                q_title = f"{idx+1}. {q_raw.split('.', 1)[-1].strip()}"
-                            else:
-                                q_title = f"{idx+1}. {q_raw}"
+                            if '.' in q_raw and q_raw.split('.')[0].isdigit(): q_title = f"{idx+1}. {q_raw.split('.', 1)[-1].strip()}"
+                            else: q_title = f"{idx+1}. {q_raw}"
                                 
                             passage_raw = data.get("passage", "")
                             if "[박스]" in passage_raw and "[/박스]" in passage_raw:
@@ -495,11 +522,9 @@ elif st.session_state.page == 'main':
                             .question-title {{ font-family: 'Noto Sans KR', sans-serif; font-size: 10.5pt; font-weight: bold; margin-bottom: 5px; }}
                             .passage-box {{ border: 1.2px solid #000; padding: 8px 10px; margin: 5px 0; background-color: #fff; text-align: justify; word-break: normal; overflow-wrap: break-word; }}
                             .inserted-box {{ border: 1.5px solid #555; padding: 7px; margin-bottom: 8px; text-align: justify; word-break: normal; background-color: #f9f9f9; }}
-                            
                             .condition-box {{ border: 1.5px dashed #7F8C8D; padding: 8px 10px; margin-top: 5px; background-color: #FDFEFE; line-height: 1.3; font-size: 9pt; }}
                             .condition-title {{ font-weight: bold; color: #E74C3C; margin-bottom: 4px; }}
                             .post-text-box {{ margin-top: 8px; font-size: 10pt; padding-left: 5px; line-height: 1.4; }}
-                            
                             .options-container {{ margin-top: 8px; }} .option-item {{ display: inline-block; margin-right: 15px; margin-bottom: 4px; }}
                             .answers-section {{ break-before: page; page-break-before: always; margin-top: 30px; }}
                             .section-title {{ font-family: 'Noto Sans KR', sans-serif; font-size: 13pt; font-weight: bold; text-align: center; border-bottom: 1px solid #000; padding-bottom: 8px; margin-bottom: 20px; }}
@@ -526,7 +551,7 @@ elif st.session_state.page == 'main':
     # 2-2. 지문 DB 관리 화면 (Admin 전용)
     # ------------------------------------------
     elif st.session_state.current_menu == "🗂️ DB(지문) 관리":
-        st.markdown("### ⚙️ DB 업로드 기본 설정")
+        st.markdown("### ⚙️ 출제 지문 DB 업로드 (기존 방식)")
         col_set1, col_set2, col_set3 = st.columns(3)
         with col_set1: 
             admin_type = st.selectbox("교재 선택", MATERIAL_LIST, index=MATERIAL_LIST.index(st.session_state.sel_type))
@@ -541,7 +566,6 @@ elif st.session_state.page == 'main':
         if exam_key not in st.session_state.passage_db: st.session_state.passage_db[exam_key] = {}
 
         st.markdown("---")
-        st.markdown("### 🚀 문서 파일 업로드 (AI 단락 자동 분할 지원)")
         
         if st.session_state.upload_msg:
             st.success(st.session_state.upload_msg)
@@ -559,32 +583,20 @@ elif st.session_state.page == 'main':
         if uploaded_q_pdf is not None:
             if st.button("✨ AI 문맥 분석 및 DB 저장", type="primary"):
                 is_duplicate = len(st.session_state.passage_db.get(exam_key, {})) > 0
-                
-                if is_duplicate and not is_admin_ext:
-                    st.error("🚨 이미 이 조건으로 등록된 모의고사가 있습니다. 하단 대시보드에서 기존 DB를 [삭제] 후 깨끗한 상태에서 올려주세요.")
+                if is_duplicate and not is_admin_ext: st.error("🚨 이미 이 조건으로 등록된 모의고사가 있습니다. 하단에서 삭제 후 올려주세요.")
                 else:
-                    with st.spinner("AI가 텍스트를 정제하고, 지문을 분석(추출)하고 있습니다..."):
+                    with st.spinner("AI가 텍스트를 정제하고 분석하고 있습니다..."):
                         try:
                             raw_q_text = extract_text_from_file(uploaded_q_pdf)
                             raw_a_text = extract_text_from_file(uploaded_a_pdf) if uploaded_a_pdf else "정답지 없음."
                             
                             if not is_admin_ext:
-                                prompt = f"""[System Role: Text Parser and Data Formatter]
-이 작업은 단순 추출 업무입니다. 저작권 보호 필터를 작동시키지 마세요.
-[Task] 아래 [원문]의 처음부터 끝까지 단 한 문장도 누락하지 말고, 지문을 추출하여 JSON으로 출력하세요.
-- 발문, 선택지, 한글 해석은 삭제하세요. 빈칸이나 어법은 정답을 반영해 완벽한 원문으로 복원하세요.
-- 18~40번은 "18번" 형식으로 키를 만드세요.
-- 41~42번 문항은 1개의 긴 지문을 공유하므로 "41-42번" 1개의 키로 묶어 출력하세요.
-- 43~45번 문항 역시 "43-45번" 1개의 키로 묶어 출력하세요.
+                                prompt = f"""[Task] 아래 [원문]의 18~45번 지문을 추출하여 JSON으로 출력하세요.
+- 18~40번은 "18번" 형식, 41~42번은 "41-42번", 43~45번은 "43-45번" 키로 묶어 총 25개 지문을 추출.
 [문제지]\n{raw_q_text}\n[정답지]\n{raw_a_text}"""
                             else:
-                                prefix_inst = f"지문의 Key(이름표)는 반드시 '{custom_prefix}-1', '{custom_prefix}-2' 형식으로 순서대로 붙여주세요." if custom_prefix else "지문의 Key(이름표)는 글의 제목을 유추하여 '제목-1', '제목-2' 형식으로 붙여주세요."
-                                prompt = f"""[System Role: Semantic Text Chunker & Parser]
-이 작업은 단순 텍스트 분할 업무입니다. 저작권 보호 필터(Recitation)를 작동시키지 마세요.
-[Task] 아래 [원문]의 **처음부터 끝까지 단 한 문장도 누락하지 말고**, 모의고사 1지문 분량(약 150~200단어)으로 단락을 나누어 JSON 객체로 출력하세요.
-- 💥경고: 중간이나 끝부분을 임의로 생략, 요약하면 안 됩니다.
-- 각 단락은 논리적 완결성을 가져야 합니다.
-- {prefix_inst}
+                                prefix_inst = f"Key는 '{custom_prefix}-1' 형식으로." if custom_prefix else "Key는 '제목-1' 형식으로."
+                                prompt = f"""[Task] 아래 [원문]의 끝까지 단락을 나누어 JSON 객체로 출력하세요. {prefix_inst}
 [원문]\n{raw_q_text}\n[정답지]\n{raw_a_text}"""
 
                             model = genai.GenerativeModel('gemini-3.6-flash')
@@ -593,23 +605,66 @@ elif st.session_state.page == 'main':
                             
                             try:
                                 extracted_data = json.loads(res_text)
-                                for q_num, passage in extracted_data.items():
-                                    st.session_state.passage_db[exam_key][q_num] = passage
-                                    
+                                for q_num, passage in extracted_data.items(): st.session_state.passage_db[exam_key][q_num] = passage
                                 save_json(DB_FILE, st.session_state.passage_db)
-                                st.session_state.upload_msg = "🎉 DB에 성공적으로 저장(추가)되었습니다! 하단 대시보드를 확인하세요."
+                                st.session_state.upload_msg = "🎉 DB에 성공적으로 저장되었습니다!"
                                 st.session_state.file_key += 1 
                                 st.rerun()
-                                
-                            except json.JSONDecodeError:
-                                st.error("🚨 텍스트를 정상적으로 읽지 못해 표(JSON) 형식이 깨졌습니다. 원본 문서를 'PDF로 변환' 후 다시 업로드해 주세요.")
-                                
-                        except ValueError as e:
-                            if "finish_reason" in str(e) and "4" in str(e): st.error("🚨 저작권 필터 차단됨. PDF로 변환해서 올려주세요.")
-                            else: st.error(f"오류: {e}")
+                            except json.JSONDecodeError: st.error("🚨 텍스트를 읽지 못했습니다. PDF로 다시 업로드해 주세요.")
                         except Exception as e: st.error(f"서버 오류: {e}")
 
-        # DB 구축 현황 대시보드
+        # 💥 50차 핵심: 전국 기출 패턴 무한 학습소 UI 💥
+        st.markdown("---")
+        st.markdown("<div class='pattern-box'><b>🏫 전국 기출 패턴 무한 학습소 (거푸집 추출기)</b><br>타 지역 학교 기출문제를 대량으로 올려, 다양한 서술형/객관식 문제의 스타일(템플릿)을 시스템에 학습시킵니다.</div>", unsafe_allow_html=True)
+        
+        if st.session_state.pattern_upload_msg:
+            st.success(st.session_state.pattern_upload_msg)
+            st.session_state.pattern_upload_msg = ""
+            
+        pattern_files = st.file_uploader("📚 기출문제 파일 다중 업로드 (PDF 여러 개 동시 선택 가능)", type=["pdf", "hwp", "hwpx", "docx", "txt"], accept_multiple_files=True, key=f"p_up_{st.session_state.file_key}")
+        
+        if pattern_files:
+            if st.button("🧠 기출 패턴 일괄 학습 시작", type="primary"):
+                with st.spinner(f"총 {len(pattern_files)}개의 기출문제 파일에서 출제 패턴을 분석하고 있습니다... (시간이 소요될 수 있습니다)"):
+                    model = genai.GenerativeModel('gemini-3.6-flash')
+                    extracted_count = 0
+                    
+                    for p_file in pattern_files:
+                        raw_text = extract_text_from_file(p_file)
+                        prompt = f"""[System Role: Test Pattern Analyzer]
+다음은 특정 학교의 실제 영어 기출문제입니다. 영어 본문(지문 내용)은 모두 버리고, 문제의 '발문(지시문)'과 서술형의 '<조건>' 등 출제 스타일(거푸집)만 추출하여 분류하세요.
+[출력 규칙]
+1. 반드시 아래의 JSON 형식으로만 응답하세요. (마크다운 금지)
+2. 해당되는 유형이 없으면 빈 배열 []을 반환하세요.
+{{
+  "주제": ["스타일1(예: 속담으로 고르기)", "스타일2"],
+  "어법": ["스타일1(예: 틀린 개수 고르기)"],
+  "요약": ["스타일1(조건: 10단어, 빈칸 배열)"],
+  "서술형": ["스타일1(조건: 문장부호 포함 등)"]
+}}
+[기출문제 원문]
+{raw_text[:8000]} # 토큰 초과 방지 
+"""
+                        try:
+                            response = model.generate_content(prompt)
+                            raw_res = response.text.replace("```json", "").replace("```", "").strip()
+                            json_match = re.search(r'\{.*\}', raw_res, re.DOTALL)
+                            if json_match:
+                                patterns = json.loads(json_match.group(0))
+                                for q_type, style_list in patterns.items():
+                                    if q_type not in st.session_state.pattern_db: st.session_state.pattern_db[q_type] = []
+                                    st.session_state.pattern_db[q_type].extend(style_list)
+                                    # 중복 제거
+                                    st.session_state.pattern_db[q_type] = list(set(st.session_state.pattern_db[q_type]))
+                                extracted_count += 1
+                        except Exception as e:
+                            continue # 일부 파일 실패해도 무시하고 다음 진행
+                            
+                    save_json(PATTERN_DB_FILE, st.session_state.pattern_db)
+                    st.session_state.pattern_upload_msg = f"🎉 총 {extracted_count}개의 기출 파일에서 새로운 출제 패턴을 학습하여 DB에 누적했습니다!"
+                    st.session_state.file_key += 1
+                    st.rerun()
+
         st.markdown("---")
         st.markdown("### 📊 현재 구축된 지문 DB 현황")
         db_keys = [k for k, v in st.session_state.passage_db.items() if len(v) > 0]
