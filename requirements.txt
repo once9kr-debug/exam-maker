@@ -3,3 +3,4 @@ google-generativeai
 pandas
 python-docx
 PyPDF2
+olefile
