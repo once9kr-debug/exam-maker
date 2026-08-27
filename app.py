@@ -149,19 +149,21 @@ def process_chunk(chunk, exam_key, passage_db, model):
         passage_text = passage_db[exam_key][task['q_num']]
         prompt += f"요청 {idx+1}. 지문(이름): {task['q_num']}, 세부유형: {task['q_type']}, 출제형태: {task['q_format']}\n원문: {passage_text}\n\n"
     
-    # 💥 프롬프트 극약 처방 💥
+    # 💥 프롬프트에 구체적인 JSON 거푸집(Template) 강제 주입 💥
     prompt += """[💥 출력 구조 및 자가 검수 규칙 💥]
-1. 오직 순수 JSON 배열만 출력하세요. (마크다운 금지)
-2. 필수 키: "question", "passage", "condition", "post_text", "options", "answer", "explanation"
-3. "question": "다음 글의 요약문을 조건에 맞게 완성하시오."와 같은 순수 '한국어 지시문'만 작성하세요. 🚨경고: 여기에 [요약문] 본체나 영어 빈칸 문장을 절대 섞어 넣지 마세요!
-4. "condition": 서술형 채점 기준 및 제한사항(예: "주어진 단어를 모두 사용할 것"). 없으면 "".
-5. "post_text": 🚨[매우 중요] 지문과 <조건> 박스 맨 아래에 제시될 [요약문] 뼈대나 영어 빈칸 문장은 무조건 이 곳(post_text)에 넣으세요! 없으면 "".
-6. "passage": 원문 텍스트만 넣으세요.
-7. [출제형태: 객관식 전용]인 경우 options 배열에 5개 선택지 제공.
-8. [출제형태: 주관식(서술형) 전용]인 경우 options는 []. 주관식은 '한글 서술'과 '영어 영작/배열'을 골고루 섞어 출제.
-9. [출제형태: 객관식+주관식 혼합]은 위 두 형태를 섞어서 출제.
-10. 삽입 문제: 맨 앞에 [박스]주어진문장[/박스] 표기.
-[필수] 결과물 출력 전 위 규칙들을 완벽히 지켰는지 자가 검증하세요."""
+반드시 아래의 JSON 배열 형식을 100% 엄격하게 준수하여 출력하세요. 각 방(Key)의 역할을 절대 섞지 마세요.
+[
+  {
+    "question": "다음 글을 읽고, 조건에 맞게 요약문을 완성하시오. (🚨경고: 여기에 요약문 본체나 조건, 영어를 절대 섞어 적지 마세요. 순수 한국어 지시문만 적습니다.)",
+    "passage": "영어 원문만 들어갑니다. (🚨경고: 여기에 <조건>이나 문제의 일부를 절대 포함하지 마세요.)",
+    "condition": "1. 30자 이내로 쓸 것 2. ~다 로 끝날 것 (제한사항이나 조건이 없으면 빈 문자열 \"\" 로 둡니다.)",
+    "post_text": "[요약문] 요약문 빈칸이나 밑줄 친 문장이 있다면 반드시 여기에 적으세요. 없으면 빈 문자열 \"\" 로 둡니다.",
+    "options": ["①...", "②..."], // 주관식일 경우 반드시 빈 배열 [] 로 둡니다.
+    "answer": "정답",
+    "explanation": "해설"
+  }
+]
+[필수] 결과물 출력 전 위 규칙과 구조를 완벽히 지켰는지 자가 검증하세요."""
     
     for attempt in range(2): 
         try:
@@ -174,16 +176,28 @@ def process_chunk(chunk, exam_key, passage_db, model):
                     is_ok, msg = rule_based_check(chunk[idx]['q_type'], prob)
                     if not is_ok: raise ValueError(msg)
                     
-                    # 💥 파이썬 강제 분리(Fallback) 청소 코드 추가 💥
-                    # AI가 말을 안듣고 question에 [요약문]을 썼다면 잘라서 post_text로 옮김
-                    q_text = prob.get("question", "")
-                    if "[요약문]" in q_text:
-                        parts = q_text.split("[요약문]", 1)
-                        prob["question"] = parts[0].strip() # 요약문 앞까지만 남김
-                        existing_post = prob.get("post_text", "").strip()
-                        # 잘라낸 요약문을 조건 박스 아래 영역(post_text)으로 강제 이주
-                        prob["post_text"] = ("[요약문] " + parts[1].strip() + "\n" + existing_post).strip()
+                    # 💥 파이썬 진공청소기: 렌더링 전 AI의 실수를 강제로 뜯어고치는 정규식 로직 💥
                     
+                    # 1. Question 방에 요약문이 섞여있으면 잘라서 Post_text로 멱살잡고 끌어내리기
+                    q_text = prob.get("question", "")
+                    match_q = re.search(r'\[요약문\]|<요약문>|【요약문】', q_text)
+                    if match_q:
+                        split_idx = match_q.start()
+                        post_part = q_text[split_idx:].strip()
+                        prob["question"] = q_text[:split_idx].strip()
+                        existing_post = prob.get("post_text", "").strip()
+                        prob["post_text"] = (post_part + "\n" + existing_post).strip()
+
+                    # 2. Passage 방에 <조건>이 섞여있으면 잘라서 Condition으로 멱살잡고 끌어내리기
+                    p_text = prob.get("passage", "")
+                    match_p = re.search(r'<조건>|\[조건\]', p_text)
+                    if match_p:
+                        split_idx = match_p.start()
+                        cond_part = p_text[split_idx:].replace("<조건>", "").replace("[조건]", "").strip()
+                        prob["passage"] = p_text[:split_idx].strip()
+                        existing_cond = prob.get("condition", "").strip()
+                        prob["condition"] = (cond_part + "\n" + existing_cond).strip()
+
                     valid_probs.append(prob)
             return chunk, valid_probs, True
         except Exception as e: time.sleep(1.5)
@@ -203,6 +217,7 @@ def save_json(filepath, data):
 if 'passage_db' not in st.session_state: st.session_state.passage_db = load_json(DB_FILE)
 if 'problem_cache' not in st.session_state: st.session_state.problem_cache = load_json(CACHE_FILE)
 
+# DB 키 마이그레이션 로직
 migrated = False
 old_keys = list(st.session_state.passage_db.keys())
 for k in old_keys:
@@ -387,7 +402,8 @@ elif st.session_state.page == 'main':
                         cached_results = {}
                         tasks_to_process = []
                         for task in current_batch:
-                            cache_key = f"{exam_key}_{task['q_num']}_{task['q_type']}_{task['q_format']}"
+                            # 💥 캐시 키에 'v2'를 붙여 예전 불량 문제를 싹 다 무시하고 100% 새로 출제하도록 강제함 💥
+                            cache_key = f"v2_{exam_key}_{task['q_num']}_{task['q_type']}_{task['q_format']}"
                             if cache_key in st.session_state.problem_cache: cached_results[cache_key] = st.session_state.problem_cache[cache_key]
                             else: tasks_to_process.append(task)
                         
@@ -406,7 +422,7 @@ elif st.session_state.page == 'main':
                                     chunk_info, probs, success = future.result()
                                     for idx, task in enumerate(chunk_info):
                                         if idx < len(probs):
-                                            cache_key = f"{exam_key}_{task['q_num']}_{task['q_type']}_{task['q_format']}"
+                                            cache_key = f"v2_{exam_key}_{task['q_num']}_{task['q_type']}_{task['q_format']}"
                                             st.session_state.problem_cache[cache_key] = probs[idx]
                                             cached_results[cache_key] = probs[idx]
                                     completed_chunks += 1
@@ -416,7 +432,7 @@ elif st.session_state.page == 'main':
                             save_json(CACHE_FILE, st.session_state.problem_cache)
                         
                         status_text.text(f"✅ Part {st.session_state.part_counter} 초고속 출제 완료! 렌더링 중...")
-                        all_generated_problems = [cached_results[f"{exam_key}_{task['q_num']}_{task['q_type']}_{task['q_format']}"] for task in current_batch if f"{exam_key}_{task['q_num']}_{task['q_type']}_{task['q_format']}" in cached_results]
+                        all_generated_problems = [cached_results[f"v2_{exam_key}_{task['q_num']}_{task['q_type']}_{task['q_format']}"] for task in current_batch if f"v2_{exam_key}_{task['q_num']}_{task['q_type']}_{task['q_format']}" in cached_results]
                         
                         questions_html = ""
                         answers_html = ""
