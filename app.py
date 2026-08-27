@@ -26,17 +26,16 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 세션 상태 (권한(role) 기억 추가)
+# 세션 상태
 # ==========================================
 if 'page' not in st.session_state: st.session_state.page = 'login'
-if 'role' not in st.session_state: st.session_state.role = None  # admin 또는 teacher
+if 'role' not in st.session_state: st.session_state.role = None
 if 'show_generator' not in st.session_state: st.session_state.show_generator = False
 if 'exam_queue' not in st.session_state: st.session_state.exam_queue = []
 if 'generated_files' not in st.session_state: st.session_state.generated_files = []
 if 'part_counter' not in st.session_state: st.session_state.part_counter = 1
 if 'total_tasks' not in st.session_state: st.session_state.total_tasks = 0
 
-# (create_word_file, rule_based_check, process_chunk 함수들은 29차와 100% 동일하므로 그대로 유지합니다.)
 def create_word_file(problems_list, header_title):
     doc = docx.Document()
     for section in doc.sections:
@@ -143,7 +142,7 @@ else:
 
 
 # ==========================================
-# 🚀 1. 로그인 페이지 (권한 분리 로직 탑재)
+# 🚀 1. 로그인 페이지
 # ==========================================
 if st.session_state.page == 'login':
     st.markdown("<div style='margin-top: 100px;'></div>", unsafe_allow_html=True)
@@ -157,12 +156,10 @@ if st.session_state.page == 'login':
         
         st.write("") 
         if st.button("로그인", use_container_width=True, type="primary"):
-            # 💥 원장님(최고 관리자) 계정
             if id_input == "master" and pw_input == "1234":
                 st.session_state.role = 'admin'
                 st.session_state.page = 'main'
                 st.rerun()
-            # 💥 캠퍼스 강사진(일반 사용자) 계정
             elif id_input in ["saerom_t", "boram_t"] and pw_input == "1111":
                 st.session_state.role = 'teacher'
                 st.session_state.page = 'main'
@@ -175,19 +172,23 @@ if st.session_state.page == 'login':
 # ==========================================
 elif st.session_state.page == 'main':
     
+    # 💥 공통 옵션 리스트 정의 (유지보수를 위해 변수로 분리)
+    YEARS_LIST = ["2026년", "2025년", "2024년", "2023년", "2022년", "2021년", "2020년", "2019년", "2018년", "2017년", "2016년", "2015년"]
+    MONTHS_LIST = ["3월", "4월", "5월", "6월", "7월", "10월", "11월", "12월"]
+    GRADES_LIST = ["고1", "고2", "고3"]
+    
     # --- 좌측 사이드바 구성 ---
     st.sidebar.markdown("### ⚙️ 출제 기본 설정")
     exam_type = st.sidebar.selectbox("교재 선택", ["고등 모의고사", "고등 교과서"])
-    exam_year = st.sidebar.selectbox("연도", ["2026년", "2025년", "2024년"])
-    exam_month = st.sidebar.selectbox("시행 월", ["3월", "6월", "9월", "11월"])
-    exam_grade = st.sidebar.selectbox("학년", ["고1", "고2", "고3"])
+    exam_year = st.sidebar.selectbox("연도", YEARS_LIST)
+    exam_month = st.sidebar.selectbox("시행 월", MONTHS_LIST)
+    exam_grade = st.sidebar.selectbox("학년", GRADES_LIST)
     
     exam_key = f"{exam_year}_{exam_month}_{exam_grade}"
     if exam_key not in st.session_state.passage_db: st.session_state.passage_db[exam_key] = {}
     
     st.sidebar.markdown("<br>", unsafe_allow_html=True)
     
-    # 💥 권한(Role)에 따른 메뉴 동적 생성
     menu_options = ["🎯 변형문제 제작"]
     if st.session_state.role == 'admin':
         menu_options.append("🗂️ 지문 DB 관리 (관리자)")
@@ -202,7 +203,6 @@ elif st.session_state.page == 'main':
         st.session_state.show_generator = False
         st.rerun()
 
-    # 상단 헤더
     st.markdown("<h2 style='text-align: center;'>SDH ACADEMY 통합 출제 플랫폼 🛠️</h2>", unsafe_allow_html=True)
     st.markdown("<hr>", unsafe_allow_html=True)
 
@@ -414,6 +414,15 @@ elif st.session_state.page == 'main':
     elif selected_menu == "🗂️ 지문 DB 관리 (관리자)":
         st.markdown(f"##### 🗂️ 현재 관리 중인 대상: **{exam_year} {exam_month}, {exam_grade}**")
         
+        # 💥 관리자용 드롭다운도 동일하게 연결 (선택값을 메인 설정과 동기화)
+        admin_year = st.selectbox("DB 관리 연도", YEARS_LIST, index=YEARS_LIST.index(exam_year))
+        admin_month = st.selectbox("DB 관리 시행 월", MONTHS_LIST, index=MONTHS_LIST.index(exam_month))
+        admin_grade = st.selectbox("DB 관리 학년", GRADES_LIST, index=GRADES_LIST.index(exam_grade))
+        
+        exam_key = f"{admin_year}_{admin_month}_{admin_grade}"
+        if exam_key not in st.session_state.passage_db: st.session_state.passage_db[exam_key] = {}
+
+        st.markdown("---")
         st.markdown("### 🚀 방법 1. 문제지 & 정답지 PDF 동시 업로드")
         pdf_col1, pdf_col2 = st.columns(2)
         with pdf_col1: uploaded_q_pdf = st.file_uploader("📝 문제지 PDF 업로드", type=["pdf"])
