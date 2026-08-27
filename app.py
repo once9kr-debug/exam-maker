@@ -86,7 +86,6 @@ def create_word_file(problems_list, header_title):
     title = doc.add_heading(header_title, level=1); title.alignment = WD_ALIGN_PARAGRAPH.CENTER
     for idx, data in enumerate(problems_list):
         
-        # 💥 1. 발문(Question) 렌더링 - 비어있을 경우 안전장치 적용
         q_raw = data.get('question', '').strip()
         if not q_raw: q_raw = "다음 글을 읽고, 조건에 맞게 물음에 답하시오."
         if '.' in q_raw and q_raw.split('.')[0].isdigit():
@@ -97,7 +96,6 @@ def create_word_file(problems_list, header_title):
         p_q = doc.add_paragraph()
         p_q.add_run(f"{idx+1}. {q_title_text}").bold = True
         
-        # 💥 2. 지문(Passage) 렌더링
         passage_raw = data.get("passage", "").replace("<br/>", "\n").replace("<br>", "\n")
         if "[박스]" in passage_raw and "[/박스]" in passage_raw:
             try:
@@ -109,7 +107,6 @@ def create_word_file(problems_list, header_title):
             except: doc.add_paragraph(passage_raw)
         else: doc.add_paragraph(passage_raw)
         
-        # 💥 3. 조건(Condition) 박스 렌더링
         condition_raw = data.get("condition", "").strip()
         if condition_raw:
             condition_clean = condition_raw.replace("<조건>", "").replace("</조건>", "").strip()
@@ -122,14 +119,12 @@ def create_word_file(problems_list, header_title):
             p_cond.runs[0].font.size = Pt(9)
             p_cond.add_run(condition_clean).font.size = Pt(9)
             
-        # 💥 4. 요약문 등 하단 텍스트(post_text) 렌더링
         post_text_raw = data.get("post_text", "").strip()
         if post_text_raw:
             p_post = doc.add_paragraph()
             p_post.paragraph_format.space_before = Pt(5)
             p_post.add_run(post_text_raw).bold = True
         
-        # 💥 5. 선택지(Options) 렌더링
         options = data.get("options", [])
         if options: doc.add_paragraph("  ".join(options))
         doc.add_paragraph("")
@@ -153,18 +148,21 @@ def process_chunk(chunk, exam_key, passage_db, model):
     for idx, task in enumerate(chunk):
         passage_text = passage_db[exam_key][task['q_num']]
         prompt += f"요청 {idx+1}. 지문(이름): {task['q_num']}, 세부유형: {task['q_type']}, 출제형태: {task['q_format']}\n원문: {passage_text}\n\n"
-    prompt += """[💥 출력 규칙 및 자가 검수 💥]
+    
+    # 💥 프롬프트 극약 처방 💥
+    prompt += """[💥 출력 구조 및 자가 검수 규칙 💥]
 1. 오직 순수 JSON 배열만 출력하세요. (마크다운 금지)
 2. 필수 키: "question", "passage", "condition", "post_text", "options", "answer", "explanation"
-3. "question": (예: "다음 글의 빈칸에 들어갈 알맞은 말을 조건에 맞게 쓰시오.") 학생이 무엇을 해야 하는지 묻는 명확한 '발문'을 반드시 작성하세요. 절대 비워두지 마세요.
-4. "condition": 주관식(서술형)의 채점 기준이나 제한사항(예: "주어진 단어를 모두 사용할 것"). 없으면 "".
-5. "post_text": 지문과 <조건> 박스 **아래에** 제시되어야 할 텍스트입니다. (예: "[요약문] According to the passage, ____.") 완성해야 할 요약문이나 뼈대 문장, 하단 빈칸 문장이 있다면 반드시 여기에 넣으세요. 없으면 "".
-6. "passage": 원문 텍스트만 순수하게 들어갑니다. (요약문이나 조건문 등을 여기에 섞지 마세요)
+3. "question": "다음 글의 요약문을 조건에 맞게 완성하시오."와 같은 순수 '한국어 지시문'만 작성하세요. 🚨경고: 여기에 [요약문] 본체나 영어 빈칸 문장을 절대 섞어 넣지 마세요!
+4. "condition": 서술형 채점 기준 및 제한사항(예: "주어진 단어를 모두 사용할 것"). 없으면 "".
+5. "post_text": 🚨[매우 중요] 지문과 <조건> 박스 맨 아래에 제시될 [요약문] 뼈대나 영어 빈칸 문장은 무조건 이 곳(post_text)에 넣으세요! 없으면 "".
+6. "passage": 원문 텍스트만 넣으세요.
 7. [출제형태: 객관식 전용]인 경우 options 배열에 5개 선택지 제공.
-8. [출제형태: 주관식(서술형) 전용]인 경우 options는 []. 주관식은 '한글 서술'과 '영어 영작/배열'을 골고루 섞어 출제하세요.
+8. [출제형태: 주관식(서술형) 전용]인 경우 options는 []. 주관식은 '한글 서술'과 '영어 영작/배열'을 골고루 섞어 출제.
 9. [출제형태: 객관식+주관식 혼합]은 위 두 형태를 섞어서 출제.
 10. 삽입 문제: 맨 앞에 [박스]주어진문장[/박스] 표기.
 [필수] 결과물 출력 전 위 규칙들을 완벽히 지켰는지 자가 검증하세요."""
+    
     for attempt in range(2): 
         try:
             response = model.generate_content(prompt)
@@ -175,6 +173,17 @@ def process_chunk(chunk, exam_key, passage_db, model):
                 if idx < len(chunk):
                     is_ok, msg = rule_based_check(chunk[idx]['q_type'], prob)
                     if not is_ok: raise ValueError(msg)
+                    
+                    # 💥 파이썬 강제 분리(Fallback) 청소 코드 추가 💥
+                    # AI가 말을 안듣고 question에 [요약문]을 썼다면 잘라서 post_text로 옮김
+                    q_text = prob.get("question", "")
+                    if "[요약문]" in q_text:
+                        parts = q_text.split("[요약문]", 1)
+                        prob["question"] = parts[0].strip() # 요약문 앞까지만 남김
+                        existing_post = prob.get("post_text", "").strip()
+                        # 잘라낸 요약문을 조건 박스 아래 영역(post_text)으로 강제 이주
+                        prob["post_text"] = ("[요약문] " + parts[1].strip() + "\n" + existing_post).strip()
+                    
                     valid_probs.append(prob)
             return chunk, valid_probs, True
         except Exception as e: time.sleep(1.5)
@@ -194,7 +203,6 @@ def save_json(filepath, data):
 if 'passage_db' not in st.session_state: st.session_state.passage_db = load_json(DB_FILE)
 if 'problem_cache' not in st.session_state: st.session_state.problem_cache = load_json(CACHE_FILE)
 
-# DB 키 마이그레이션 로직
 migrated = False
 old_keys = list(st.session_state.passage_db.keys())
 for k in old_keys:
@@ -414,7 +422,6 @@ elif st.session_state.page == 'main':
                         answers_html = ""
                         for idx, data in enumerate(all_generated_problems):
                             
-                            # 발문 (비어있으면 기본값 세팅)
                             q_raw = data.get('question', '').strip()
                             if not q_raw: q_raw = "다음 글을 읽고, 조건에 맞게 물음에 답하시오."
                             if '.' in q_raw and q_raw.split('.')[0].isdigit():
@@ -429,14 +436,12 @@ elif st.session_state.page == 'main':
                                 passage_html = f'<div class="inserted-box">{inserted_box}</div><div class="passage-box">{main_passage}</div>'
                             else: passage_html = f'<div class="passage-box">{passage_raw}</div>'
                             
-                            # 💥 조건 박스 렌더링
                             condition_raw = data.get("condition", "").strip()
                             condition_html = ""
                             if condition_raw and condition_raw != '""':
                                 condition_clean = condition_raw.replace("<조건>", "").replace("</조건>", "").strip()
                                 condition_html = f'<div class="condition-box"><div class="condition-title">[조건]</div>{condition_clean}</div>'
                                 
-                            # 💥 요약문 등 하단 텍스트(post_text) 렌더링
                             post_text_raw = data.get("post_text", "").strip()
                             post_text_html = ""
                             if post_text_raw and post_text_raw != '""':
