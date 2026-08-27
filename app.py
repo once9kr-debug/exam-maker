@@ -45,6 +45,10 @@ if 'generated_files' not in st.session_state: st.session_state.generated_files =
 if 'part_counter' not in st.session_state: st.session_state.part_counter = 1
 if 'total_tasks' not in st.session_state: st.session_state.total_tasks = 0
 
+# 💥 업로드 창 초기화를 위한 다이내믹 키 & 메시지 세션 추가
+if 'file_key' not in st.session_state: st.session_state.file_key = 0
+if 'upload_msg' not in st.session_state: st.session_state.upload_msg = ""
+
 YEARS_LIST = ["2026년", "2025년", "2024년", "2023년", "2022년", "2021년", "2020년", "2019년", "2018년", "2017년", "2016년", "2015년"]
 MONTHS_LIST = ["3월", "4월", "5월", "6월", "7월", "10월", "11월", "12월"]
 GRADES_LIST = ["고1", "고2", "고3"]
@@ -443,14 +447,21 @@ elif st.session_state.page == 'main':
         st.markdown("---")
         st.markdown("### 🚀 문서 파일 업로드 (AI 단락 자동 분할 지원)")
         
+        # 💥 업로드 성공 시 나타날 축하 메시지 영역
+        if st.session_state.upload_msg:
+            st.success(st.session_state.upload_msg)
+            st.session_state.upload_msg = "" # 보여준 후 즉시 삭제
+            
         custom_prefix = ""
         if is_admin_ext:
             st.info("💡 외부지문/교과서는 AI가 문맥에 따라 단락을 자동으로 분할하며, **기존 DB에 여러 파일을 계속 누적(이어올리기)** 할 수 있습니다.")
             custom_prefix = st.text_input("📝 추가할 지문 그룹 이름표 (예: Odyssey_하)")
 
         pdf_col1, pdf_col2 = st.columns(2)
-        with pdf_col1: uploaded_q_pdf = st.file_uploader("📝 지문 파일 업로드 (PDF/HWP)", type=["pdf", "hwp", "hwpx", "docx", "txt"])
-        with pdf_col2: uploaded_a_pdf = st.file_uploader("💡 해설지 파일 업로드 (선택)", type=["pdf", "hwp", "hwpx", "docx", "txt"])
+        
+        # 💥 다이내믹 키(Dynamic Key) 적용: 파일 업로더에 키를 부여하여 저장 완료 시 새것으로 렌더링되게 만듦
+        with pdf_col1: uploaded_q_pdf = st.file_uploader("📝 지문 파일 업로드 (PDF/HWP)", type=["pdf", "hwp", "hwpx", "docx", "txt"], key=f"q_up_{st.session_state.file_key}")
+        with pdf_col2: uploaded_a_pdf = st.file_uploader("💡 해설지 파일 업로드 (선택)", type=["pdf", "hwp", "hwpx", "docx", "txt"], key=f"a_up_{st.session_state.file_key}")
         
         if uploaded_q_pdf is not None:
             if st.button("✨ AI 문맥 분석 및 DB 저장", type="primary"):
@@ -484,14 +495,17 @@ elif st.session_state.page == 'main':
                             response = model.generate_content(prompt)
                             res_text = response.text.strip().replace("```json", "").replace("```", "").strip()
                             
-                            # 💥 JSON 파싱 에러 방어벽 (41차 핵심) 💥
                             try:
                                 extracted_data = json.loads(res_text)
                                 for q_num, passage in extracted_data.items():
                                     st.session_state.passage_db[exam_key][q_num] = passage
                                     
                                 save_json(DB_FILE, st.session_state.passage_db)
-                                st.success("🎉 DB에 성공적으로 저장(추가)되었습니다! 하단 대시보드를 확인하세요.")
+                                
+                                # 💥 핵심 로직: 저장 완료 후 업로드 창 초기화 및 메시지 띄우기
+                                st.session_state.upload_msg = "🎉 DB에 성공적으로 저장(추가)되었습니다! 하단 대시보드를 확인하세요."
+                                st.session_state.file_key += 1 # 파일 업로더 키를 변경해 강제 초기화
+                                st.rerun()
                                 
                             except json.JSONDecodeError:
                                 st.error("🚨 HWP 파일의 텍스트를 정상적으로 읽지 못해 AI가 표(JSON) 형식의 답변을 만들지 못했습니다. 번거로우시더라도 해당 문서를 한글 프로그램에서 'PDF로 저장'하신 후 PDF 파일로 다시 업로드해 주세요.")
