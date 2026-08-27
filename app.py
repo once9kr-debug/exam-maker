@@ -10,6 +10,7 @@ from docx.shared import Pt, Inches
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from io import BytesIO
 import concurrent.futures
+import olefile
 
 # ==========================================
 # 페이지 기본 설정
@@ -35,6 +36,35 @@ if 'exam_queue' not in st.session_state: st.session_state.exam_queue = []
 if 'generated_files' not in st.session_state: st.session_state.generated_files = []
 if 'part_counter' not in st.session_state: st.session_state.part_counter = 1
 if 'total_tasks' not in st.session_state: st.session_state.total_tasks = 0
+
+# ==========================================
+# 💥 통합 문서 텍스트 추출기 (PDF, HWP, DOCX, TXT)
+# ==========================================
+def extract_text_from_file(file_obj):
+    if file_obj is None: return "정답지 없음."
+    ext = file_obj.name.split('.')[-1].lower()
+    text = ""
+    try:
+        if ext == "pdf":
+            reader = PyPDF2.PdfReader(file_obj)
+            text = "".join([page.extract_text() + "\n" for page in reader.pages if page.extract_text()])
+        elif ext == "docx":
+            doc = docx.Document(file_obj)
+            text = "".join([p.text + "\n" for p in doc.paragraphs])
+        elif ext == "hwp":
+            if olefile.isOleFile(file_obj):
+                ole = olefile.OleFileIO(file_obj)
+                if ole.exists("PrvText"):
+                    text = ole.openstream("PrvText").read().decode("utf-16le")
+                else:
+                    text = "HWP 추출 실패: '미리보기 텍스트'가 포함되지 않은 파일입니다. 가급적 PDF로 변환하여 업로드해주세요."
+            else:
+                text = "유효한 HWP 파일이 아닙니다."
+        elif ext == "txt":
+            text = file_obj.read().decode('utf-8')
+    except Exception as e:
+        text = f"파일 읽기 오류: {e}"
+    return text
 
 def create_word_file(problems_list, header_title):
     doc = docx.Document()
@@ -140,7 +170,6 @@ else:
     st.error("API 키가 설정되지 않았습니다.")
     st.stop()
 
-
 # ==========================================
 # 🚀 1. 로그인 페이지
 # ==========================================
@@ -171,13 +200,10 @@ if st.session_state.page == 'login':
 # 🚀 2. 메인 페이지 (출제 및 관리)
 # ==========================================
 elif st.session_state.page == 'main':
-    
-    # 💥 공통 옵션 리스트 정의 (유지보수를 위해 변수로 분리)
     YEARS_LIST = ["2026년", "2025년", "2024년", "2023년", "2022년", "2021년", "2020년", "2019년", "2018년", "2017년", "2016년", "2015년"]
     MONTHS_LIST = ["3월", "4월", "5월", "6월", "7월", "10월", "11월", "12월"]
     GRADES_LIST = ["고1", "고2", "고3"]
     
-    # --- 좌측 사이드바 구성 ---
     st.sidebar.markdown("### ⚙️ 출제 기본 설정")
     exam_type = st.sidebar.selectbox("교재 선택", ["고등 모의고사", "고등 교과서"])
     exam_year = st.sidebar.selectbox("연도", YEARS_LIST)
@@ -206,16 +232,11 @@ elif st.session_state.page == 'main':
     st.markdown("<h2 style='text-align: center;'>SDH ACADEMY 통합 출제 플랫폼 🛠️</h2>", unsafe_allow_html=True)
     st.markdown("<hr>", unsafe_allow_html=True)
 
-    # ------------------------------------------
-    # 2-1. 변형문제 제작 화면
-    # ------------------------------------------
     if selected_menu == "🎯 변형문제 제작":
         st.markdown(f"##### 📌 출제 대상: **{exam_year} {exam_month}, {exam_grade} 모의고사**")
-        
         st.markdown("<div class='group-header'>📌 1. 출제할 세부 유형 선택</div>", unsafe_allow_html=True)
         st.checkbox("✅ 전체 유형 선택", key="type_all", on_change=toggle_all_types)
         st.write("")
-        
         col1, col2, col3, col4, col5 = st.columns(5)
         with col1:
             t_purpose = st.checkbox("목적", key="t_purpose"); t_mood = st.checkbox("심경/분위기", key="t_mood"); t_claim = st.checkbox("주장", key="t_claim")
@@ -231,7 +252,6 @@ elif st.session_state.page == 'main':
         st.markdown("---")
         st.markdown("<div class='group-header'>📖 2. 모의고사 지문(번호) 선택</div>", unsafe_allow_html=True)
         st.checkbox("✅ 전체 지문 선택", key="q_all", on_change=toggle_all_q)
-        
         q_cols = st.columns(10)
         for i, q_num in enumerate(range(18, 46)):
             with q_cols[i % 10]: st.checkbox(f"{q_num}번", key=f"q_{q_num}")
@@ -264,7 +284,6 @@ elif st.session_state.page == 'main':
             else:
                 current_db = st.session_state.passage_db.get(exam_key, {})
                 missing_passages = [q for q in selected_q_nums if q not in current_db or current_db[q].strip() == ""]
-                
                 if missing_passages:
                     st.error(f"🚨 다음 지문이 DB에 없습니다: {', '.join(missing_passages)}\n'지문 DB 관리 (관리자)' 메뉴에서 먼저 등록해주세요.")
                 else:
@@ -284,28 +303,17 @@ elif st.session_state.page == 'main':
                 for file_info in st.session_state.generated_files:
                     dl_col1, dl_col2 = st.columns(2)
                     with dl_col1:
-                        st.download_button(
-                            label=f"🌐 Part {file_info['part']} 인쇄용 HTML 다운로드", data=file_info['html'], 
-                            file_name=f"SDH_Premium_Part_{file_info['part']}.html", mime="text/html",
-                            key=f"dl_html_{file_info['part']}", use_container_width=True
-                        )
+                        st.download_button(label=f"🌐 Part {file_info['part']} HTML 다운로드", data=file_info['html'], file_name=f"SDH_Premium_Part_{file_info['part']}.html", mime="text/html", key=f"dl_html_{file_info['part']}", use_container_width=True)
                     with dl_col2:
-                        st.download_button(
-                            label=f"📝 Part {file_info['part']} 편집용 Word 다운로드", data=file_info['word'], 
-                            file_name=f"SDH_Premium_Part_{file_info['part']}.docx", 
-                            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                            key=f"dl_word_{file_info['part']}", use_container_width=True
-                        )
+                        st.download_button(label=f"📝 Part {file_info['part']} Word 다운로드", data=file_info['word'], file_name=f"SDH_Premium_Part_{file_info['part']}.docx", mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document", key=f"dl_word_{file_info['part']}", use_container_width=True)
                 st.markdown("---")
             
             if remain_tasks > 0:
                 target_amount = min(split_size, remain_tasks)
                 if st.button(f"🚀 2단계: Part {st.session_state.part_counter} 초고속 출제 시작 ({target_amount}문제)", type="primary", use_container_width=True):
-                    
                     current_batch = st.session_state.exam_queue[:target_amount]
                     cached_results = {}
                     tasks_to_process = []
-                    
                     for task in current_batch:
                         cache_key = f"{exam_key}_{task['q_num']}_{task['q_type']}"
                         if cache_key in st.session_state.problem_cache:
@@ -321,10 +329,8 @@ elif st.session_state.page == 'main':
                         chunks = [tasks_to_process[i:i + chunk_size] for i in range(0, len(tasks_to_process), chunk_size)]
                         total_chunks = len(chunks)
                         completed_chunks = 0
-                        
                         with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
                             future_to_chunk = {executor.submit(process_chunk, c, exam_key, st.session_state.passage_db, model): c for c in chunks}
-                            
                             for future in concurrent.futures.as_completed(future_to_chunk):
                                 chunk_info, probs, success = future.result()
                                 for idx, task in enumerate(chunk_info):
@@ -332,21 +338,17 @@ elif st.session_state.page == 'main':
                                         cache_key = f"{exam_key}_{task['q_num']}_{task['q_type']}"
                                         st.session_state.problem_cache[cache_key] = probs[idx]
                                         cached_results[cache_key] = probs[idx]
-                                        
                                 completed_chunks += 1
                                 progress = min(1.0, completed_chunks / total_chunks)
                                 progress_bar.progress(progress)
                                 status_text.text(f"⚡ 초고속 병렬 출제 중... (총 {total_chunks}구간 중 {completed_chunks}구간 완료)")
-                        
                         save_json(CACHE_FILE, st.session_state.problem_cache)
                     
                     status_text.text(f"✅ Part {st.session_state.part_counter} 초고속 출제 완료! 렌더링 중...")
-                    
                     all_generated_problems = [cached_results[f"{exam_key}_{task['q_num']}_{task['q_type']}"] for task in current_batch if f"{exam_key}_{task['q_num']}_{task['q_type']}" in cached_results]
                     
                     questions_html = ""
                     answers_html = ""
-                    
                     for idx, data in enumerate(all_generated_problems):
                         q_title = f"{idx+1}. {data.get('question', '문제 누락').split('.', 1)[-1].strip() if '.' in data.get('question', '') else data.get('question', '')}"
                         passage_raw = data.get("passage", "")
@@ -355,19 +357,16 @@ elif st.session_state.page == 'main':
                             main_passage = passage_raw.split("[/박스]")[1].strip()
                             passage_html = f'<div class="inserted-box">{inserted_box}</div><div class="passage-box">{main_passage}</div>'
                         else: passage_html = f'<div class="passage-box">{passage_raw}</div>'
-                        
                         options_html = ""
                         options = data.get("options", [])
                         if options:
                             options_html += '<div class="options-container">'
                             for opt in options: options_html += f'<div class="option-item">{opt}</div>'
                             options_html += '</div>'
-                            
                         questions_html += f'<div class="question-block"><div class="question-title">{q_title}</div>{passage_html}{options_html}</div>'
                         answers_html += f'<div class="answer-block"><b>{idx+1}번 - {data.get("answer", "")}</b><br/><b>[해설]</b> {data.get("explanation", "")}</div>'
 
                     header_title = f"{exam_year} {exam_month} {exam_grade} 모의고사 변형문제 (Part {st.session_state.part_counter})"
-                    
                     html_content = f'''
                     <!DOCTYPE html><html lang="ko"><head><meta charset="utf-8"><title>{header_title}</title>
                     <style>
@@ -394,14 +393,10 @@ elif st.session_state.page == 'main':
                     </body></html>'''
                     
                     word_buffer = create_word_file(all_generated_problems, header_title)
-                    
                     st.session_state.generated_files.append({
-                        "part": st.session_state.part_counter,
-                        "count": len(all_generated_problems),
-                        "html": html_content,
-                        "word": word_buffer.getvalue()
+                        "part": st.session_state.part_counter, "count": len(all_generated_problems),
+                        "html": html_content, "word": word_buffer.getvalue()
                     })
-                    
                     st.session_state.exam_queue = st.session_state.exam_queue[target_amount:]
                     st.session_state.part_counter += 1
                     st.rerun() 
@@ -414,7 +409,6 @@ elif st.session_state.page == 'main':
     elif selected_menu == "🗂️ 지문 DB 관리 (관리자)":
         st.markdown(f"##### 🗂️ 현재 관리 중인 대상: **{exam_year} {exam_month}, {exam_grade}**")
         
-        # 💥 관리자용 드롭다운도 동일하게 연결 (선택값을 메인 설정과 동기화)
         admin_year = st.selectbox("DB 관리 연도", YEARS_LIST, index=YEARS_LIST.index(exam_year))
         admin_month = st.selectbox("DB 관리 시행 월", MONTHS_LIST, index=MONTHS_LIST.index(exam_month))
         admin_grade = st.selectbox("DB 관리 학년", GRADES_LIST, index=GRADES_LIST.index(exam_grade))
@@ -423,24 +417,27 @@ elif st.session_state.page == 'main':
         if exam_key not in st.session_state.passage_db: st.session_state.passage_db[exam_key] = {}
 
         st.markdown("---")
-        st.markdown("### 🚀 방법 1. 문제지 & 정답지 PDF 동시 업로드")
+        st.markdown("### 🚀 방법 1. 문서 파일 업로드 (PDF, HWP, DOCX, TXT 지원)")
         pdf_col1, pdf_col2 = st.columns(2)
-        with pdf_col1: uploaded_q_pdf = st.file_uploader("📝 문제지 PDF 업로드", type=["pdf"])
-        with pdf_col2: uploaded_a_pdf = st.file_uploader("💡 정답/해설지 PDF 업로드 (선택)", type=["pdf"])
+        
+        # 💥 허용 확장자 업데이트
+        with pdf_col1: uploaded_q_pdf = st.file_uploader("📝 문제지 파일 업로드", type=["pdf", "hwp", "hwpx", "docx", "txt"])
+        with pdf_col2: uploaded_a_pdf = st.file_uploader("💡 정답/해설지 파일 업로드 (선택)", type=["pdf", "hwp", "hwpx", "docx", "txt"])
         
         if uploaded_q_pdf is not None:
             if st.button("✨ AI 정답 반영 지문 추출 및 DB 저장", type="primary"):
-                with st.spinner("순수 원문을 복원 중입니다..."):
+                with st.spinner("다양한 포맷의 문서를 텍스트로 변환하고 순수 원문을 복원 중입니다..."):
                     try:
-                        q_reader = PyPDF2.PdfReader(uploaded_q_pdf)
-                        raw_q_text = "".join([page.extract_text() + "\n" for page in q_reader.pages])
-                        raw_a_text = "".join([page.extract_text() + "\n" for page in PyPDF2.PdfReader(uploaded_a_pdf).pages]) if uploaded_a_pdf else "정답지 없음."
+                        # 💥 새롭게 만든 통합 추출 엔진 적용
+                        raw_q_text = extract_text_from_file(uploaded_q_pdf)
+                        raw_a_text = extract_text_from_file(uploaded_a_pdf) if uploaded_a_pdf else "정답지 없음."
+                        
                         prompt = f"""고등학교 영어 지문 복원 전문가로서, 아래 텍스트에서 18~45번 지문을 복원해 JSON 형태로 출력하세요. 발문과 선택지는 지우고, 빈칸과 어법 오류는 정답을 반영해 완벽한 원문으로 만드세요. 밑줄과 번호 기호도 모두 삭제하세요.\n[문제지]\n{raw_q_text}\n\n[정답지]\n{raw_a_text}"""
                         response = genai.GenerativeModel('gemini-3.6-flash').generate_content(prompt)
                         res_text = response.text.strip().replace("```json", "").replace("```", "").strip()
                         for q_num, passage in json.loads(res_text).items(): st.session_state.passage_db[exam_key][q_num] = passage
                         save_json(DB_FILE, st.session_state.passage_db)
-                        st.success("🎉 DB 저장 완료!")
+                        st.success("🎉 만능 추출 및 DB 저장 완료!")
                     except Exception as e: st.error(f"오류: {e}")
                     
         st.markdown("---")
