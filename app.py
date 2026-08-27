@@ -149,7 +149,6 @@ def process_chunk(chunk, exam_key, passage_db, model):
         passage_text = passage_db[exam_key][task['q_num']]
         prompt += f"요청 {idx+1}. 지문(이름): {task['q_num']}, 세부유형: {task['q_type']}, 출제형태: {task['q_format']}\n원문: {passage_text}\n\n"
     
-    # 💥 프롬프트에 구체적인 JSON 거푸집(Template) 강제 주입 💥
     prompt += """[💥 출력 구조 및 자가 검수 규칙 💥]
 반드시 아래의 JSON 배열 형식을 100% 엄격하게 준수하여 출력하세요. 각 방(Key)의 역할을 절대 섞지 마세요.
 [
@@ -165,20 +164,27 @@ def process_chunk(chunk, exam_key, passage_db, model):
 ]
 [필수] 결과물 출력 전 위 규칙과 구조를 완벽히 지켰는지 자가 검증하세요."""
     
-    for attempt in range(2): 
+    # 💥 재시도 횟수 3회로 증가시켜 안정성 확보
+    for attempt in range(3): 
         try:
             response = model.generate_content(prompt)
-            raw_text = response.text.strip().replace("```json", "").replace("```", "").strip()
-            probs = json.loads(raw_text)
+            raw_text = response.text
+            
+            # 💥 지능형 JSON 추출기: AI가 앞뒤로 헛소리를 해도 대괄호 배열만 쏙 뽑아냄 💥
+            json_match = re.search(r'\[\s*\{.*?\}\s*\]', raw_text, re.DOTALL)
+            if json_match:
+                clean_json_str = json_match.group(0)
+            else:
+                clean_json_str = raw_text.replace("```json", "").replace("```", "").strip()
+                
+            probs = json.loads(clean_json_str)
             valid_probs = []
+            
             for idx, prob in enumerate(probs):
                 if idx < len(chunk):
                     is_ok, msg = rule_based_check(chunk[idx]['q_type'], prob)
                     if not is_ok: raise ValueError(msg)
                     
-                    # 💥 파이썬 진공청소기: 렌더링 전 AI의 실수를 강제로 뜯어고치는 정규식 로직 💥
-                    
-                    # 1. Question 방에 요약문이 섞여있으면 잘라서 Post_text로 멱살잡고 끌어내리기
                     q_text = prob.get("question", "")
                     match_q = re.search(r'\[요약문\]|<요약문>|【요약문】', q_text)
                     if match_q:
@@ -188,7 +194,6 @@ def process_chunk(chunk, exam_key, passage_db, model):
                         existing_post = prob.get("post_text", "").strip()
                         prob["post_text"] = (post_part + "\n" + existing_post).strip()
 
-                    # 2. Passage 방에 <조건>이 섞여있으면 잘라서 Condition으로 멱살잡고 끌어내리기
                     p_text = prob.get("passage", "")
                     match_p = re.search(r'<조건>|\[조건\]', p_text)
                     if match_p:
@@ -200,8 +205,10 @@ def process_chunk(chunk, exam_key, passage_db, model):
 
                     valid_probs.append(prob)
             return chunk, valid_probs, True
-        except Exception as e: time.sleep(1.5)
-    return chunk, [{"question": "[⚠️검수 실패] 수동 확인 요망", "passage": "생성 오류", "condition": "", "post_text": "", "options": [], "answer": "1", "explanation": "재시도 요망"} for _ in chunk], False
+        except Exception as e: 
+            time.sleep(2.0) # 💥 에러 시 대기 시간을 늘려 API 과부하 방지
+            
+    return chunk, [{"question": "[⚠️검수 실패] 수동 확인 요망", "passage": "AI 생성 중 오류가 발생했습니다. (API 제한 또는 형식 오류)", "condition": "", "post_text": "", "options": [], "answer": "1", "explanation": "재시도 요망"} for _ in chunk], False
 
 DB_FILE = "sdh_passages_db.json"
 CACHE_FILE = "sdh_problems_cache_db.json"
@@ -217,7 +224,6 @@ def save_json(filepath, data):
 if 'passage_db' not in st.session_state: st.session_state.passage_db = load_json(DB_FILE)
 if 'problem_cache' not in st.session_state: st.session_state.problem_cache = load_json(CACHE_FILE)
 
-# DB 키 마이그레이션 로직
 migrated = False
 old_keys = list(st.session_state.passage_db.keys())
 for k in old_keys:
@@ -402,8 +408,8 @@ elif st.session_state.page == 'main':
                         cached_results = {}
                         tasks_to_process = []
                         for task in current_batch:
-                            # 💥 캐시 키에 'v2'를 붙여 예전 불량 문제를 싹 다 무시하고 100% 새로 출제하도록 강제함 💥
-                            cache_key = f"v2_{exam_key}_{task['q_num']}_{task['q_type']}_{task['q_format']}"
+                            # 💥 캐시 키 v3 로 업데이트: 이전의 불량 문제들을 싹 잊고 무조건 새로 출제! 💥
+                            cache_key = f"v3_{exam_key}_{task['q_num']}_{task['q_type']}_{task['q_format']}"
                             if cache_key in st.session_state.problem_cache: cached_results[cache_key] = st.session_state.problem_cache[cache_key]
                             else: tasks_to_process.append(task)
                         
@@ -412,17 +418,18 @@ elif st.session_state.page == 'main':
                         model = genai.GenerativeModel('gemini-3.6-flash')
                         
                         if tasks_to_process:
+                            # 💥 API 과부하 차단: 동시 처리 갯수 축소 (4 -> 2)
                             chunk_size = 2 
                             chunks = [tasks_to_process[i:i + chunk_size] for i in range(0, len(tasks_to_process), chunk_size)]
                             total_chunks = len(chunks)
                             completed_chunks = 0
-                            with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+                            with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
                                 future_to_chunk = {executor.submit(process_chunk, c, exam_key, st.session_state.passage_db, model): c for c in chunks}
                                 for future in concurrent.futures.as_completed(future_to_chunk):
                                     chunk_info, probs, success = future.result()
                                     for idx, task in enumerate(chunk_info):
                                         if idx < len(probs):
-                                            cache_key = f"v2_{exam_key}_{task['q_num']}_{task['q_type']}_{task['q_format']}"
+                                            cache_key = f"v3_{exam_key}_{task['q_num']}_{task['q_type']}_{task['q_format']}"
                                             st.session_state.problem_cache[cache_key] = probs[idx]
                                             cached_results[cache_key] = probs[idx]
                                     completed_chunks += 1
@@ -432,7 +439,7 @@ elif st.session_state.page == 'main':
                             save_json(CACHE_FILE, st.session_state.problem_cache)
                         
                         status_text.text(f"✅ Part {st.session_state.part_counter} 초고속 출제 완료! 렌더링 중...")
-                        all_generated_problems = [cached_results[f"v2_{exam_key}_{task['q_num']}_{task['q_type']}_{task['q_format']}"] for task in current_batch if f"v2_{exam_key}_{task['q_num']}_{task['q_type']}_{task['q_format']}" in cached_results]
+                        all_generated_problems = [cached_results[f"v3_{exam_key}_{task['q_num']}_{task['q_type']}_{task['q_format']}"] for task in current_batch if f"v3_{exam_key}_{task['q_num']}_{task['q_type']}_{task['q_format']}" in cached_results]
                         
                         questions_html = ""
                         answers_html = ""
