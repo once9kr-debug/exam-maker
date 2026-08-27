@@ -38,7 +38,7 @@ if 'part_counter' not in st.session_state: st.session_state.part_counter = 1
 if 'total_tasks' not in st.session_state: st.session_state.total_tasks = 0
 
 # ==========================================
-# 💥 통합 문서 텍스트 추출기 (PDF, HWP, DOCX, TXT)
+# 문서 텍스트 추출기 (PDF, HWP, DOCX, TXT)
 # ==========================================
 def extract_text_from_file(file_obj):
     if file_obj is None: return "정답지 없음."
@@ -51,13 +51,13 @@ def extract_text_from_file(file_obj):
         elif ext == "docx":
             doc = docx.Document(file_obj)
             text = "".join([p.text + "\n" for p in doc.paragraphs])
-        elif ext == "hwp":
+        elif ext in ["hwp", "hwpx"]:
             if olefile.isOleFile(file_obj):
                 ole = olefile.OleFileIO(file_obj)
                 if ole.exists("PrvText"):
                     text = ole.openstream("PrvText").read().decode("utf-16le")
                 else:
-                    text = "HWP 추출 실패: '미리보기 텍스트'가 포함되지 않은 파일입니다. 가급적 PDF로 변환하여 업로드해주세요."
+                    text = "HWP 추출 실패: 미리보기 텍스트가 포함되지 않은 파일입니다. PDF로 변환 후 업로드해주세요."
             else:
                 text = "유효한 HWP 파일이 아닙니다."
         elif ext == "txt":
@@ -204,12 +204,14 @@ elif st.session_state.page == 'main':
     MONTHS_LIST = ["3월", "4월", "5월", "6월", "7월", "10월", "11월", "12월"]
     GRADES_LIST = ["고1", "고2", "고3"]
     
+    # --- 좌측 사이드바 구성 (단일 기준점) ---
     st.sidebar.markdown("### ⚙️ 출제 기본 설정")
     exam_type = st.sidebar.selectbox("교재 선택", ["고등 모의고사", "고등 교과서"])
     exam_year = st.sidebar.selectbox("연도", YEARS_LIST)
     exam_month = st.sidebar.selectbox("시행 월", MONTHS_LIST)
     exam_grade = st.sidebar.selectbox("학년", GRADES_LIST)
     
+    # 사이드바 설정값이 곧 시스템 전체의 key가 됩니다.
     exam_key = f"{exam_year}_{exam_month}_{exam_grade}"
     if exam_key not in st.session_state.passage_db: st.session_state.passage_db[exam_key] = {}
     
@@ -232,6 +234,9 @@ elif st.session_state.page == 'main':
     st.markdown("<h2 style='text-align: center;'>SDH ACADEMY 통합 출제 플랫폼 🛠️</h2>", unsafe_allow_html=True)
     st.markdown("<hr>", unsafe_allow_html=True)
 
+    # ------------------------------------------
+    # 2-1. 변형문제 제작 화면
+    # ------------------------------------------
     if selected_menu == "🎯 변형문제 제작":
         st.markdown(f"##### 📌 출제 대상: **{exam_year} {exam_month}, {exam_grade} 모의고사**")
         st.markdown("<div class='group-header'>📌 1. 출제할 세부 유형 선택</div>", unsafe_allow_html=True)
@@ -407,20 +412,14 @@ elif st.session_state.page == 'main':
     # 2-2. 지문 DB 관리 화면 (Admin 전용)
     # ------------------------------------------
     elif selected_menu == "🗂️ 지문 DB 관리 (관리자)":
+        # 💥 불필요한 드롭다운 메뉴 3개 완벽 삭제 💥
+        # 오직 좌측 사이드바의 정보만 띄워줍니다.
         st.markdown(f"##### 🗂️ 현재 관리 중인 대상: **{exam_year} {exam_month}, {exam_grade}**")
-        
-        admin_year = st.selectbox("DB 관리 연도", YEARS_LIST, index=YEARS_LIST.index(exam_year))
-        admin_month = st.selectbox("DB 관리 시행 월", MONTHS_LIST, index=MONTHS_LIST.index(exam_month))
-        admin_grade = st.selectbox("DB 관리 학년", GRADES_LIST, index=GRADES_LIST.index(exam_grade))
-        
-        exam_key = f"{admin_year}_{admin_month}_{admin_grade}"
-        if exam_key not in st.session_state.passage_db: st.session_state.passage_db[exam_key] = {}
+        st.info("💡 파일 업로드 시, 좌측 사이드바에 설정된 연도/월/학년으로 지문이 자동 저장됩니다.")
 
         st.markdown("---")
         st.markdown("### 🚀 방법 1. 문서 파일 업로드 (PDF, HWP, DOCX, TXT 지원)")
         pdf_col1, pdf_col2 = st.columns(2)
-        
-        # 💥 허용 확장자 업데이트
         with pdf_col1: uploaded_q_pdf = st.file_uploader("📝 문제지 파일 업로드", type=["pdf", "hwp", "hwpx", "docx", "txt"])
         with pdf_col2: uploaded_a_pdf = st.file_uploader("💡 정답/해설지 파일 업로드 (선택)", type=["pdf", "hwp", "hwpx", "docx", "txt"])
         
@@ -428,7 +427,6 @@ elif st.session_state.page == 'main':
             if st.button("✨ AI 정답 반영 지문 추출 및 DB 저장", type="primary"):
                 with st.spinner("다양한 포맷의 문서를 텍스트로 변환하고 순수 원문을 복원 중입니다..."):
                     try:
-                        # 💥 새롭게 만든 통합 추출 엔진 적용
                         raw_q_text = extract_text_from_file(uploaded_q_pdf)
                         raw_a_text = extract_text_from_file(uploaded_a_pdf) if uploaded_a_pdf else "정답지 없음."
                         
