@@ -26,35 +26,30 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 세션 상태 (페이지 라우팅 및 상태 기억)
+# 세션 상태 (권한(role) 기억 추가)
 # ==========================================
 if 'page' not in st.session_state: st.session_state.page = 'login'
+if 'role' not in st.session_state: st.session_state.role = None  # admin 또는 teacher
 if 'show_generator' not in st.session_state: st.session_state.show_generator = False
 if 'exam_queue' not in st.session_state: st.session_state.exam_queue = []
 if 'generated_files' not in st.session_state: st.session_state.generated_files = []
 if 'part_counter' not in st.session_state: st.session_state.part_counter = 1
 if 'total_tasks' not in st.session_state: st.session_state.total_tasks = 0
 
-# ==========================================
-# 워드(.docx) 파일 생성 엔진
-# ==========================================
+# (create_word_file, rule_based_check, process_chunk 함수들은 29차와 100% 동일하므로 그대로 유지합니다.)
 def create_word_file(problems_list, header_title):
     doc = docx.Document()
     for section in doc.sections:
         section.top_margin = Inches(0.5); section.bottom_margin = Inches(0.5)
         section.left_margin = Inches(0.6); section.right_margin = Inches(0.6)
-
     title = doc.add_heading(header_title, level=1)
     title.alignment = WD_ALIGN_PARAGRAPH.CENTER
-
     for idx, data in enumerate(problems_list):
         q_title_text = data.get('question', '문제 누락').split('.', 1)[-1].strip() if '.' in data.get('question', '') else data.get('question', '')
         q_title = f"{idx+1}. {q_title_text}"
         p_q = doc.add_paragraph()
         p_q.add_run(q_title).bold = True
-
         passage_raw = data.get("passage", "").replace("<br/>", "\n").replace("<br>", "\n")
-        
         if "[박스]" in passage_raw and "[/박스]" in passage_raw:
             try:
                 inserted_box = passage_raw.split("[박스]")[1].split("[/박스]")[0]
@@ -65,26 +60,20 @@ def create_word_file(problems_list, header_title):
                 doc.add_paragraph(main_passage)
             except: doc.add_paragraph(passage_raw)
         else: doc.add_paragraph(passage_raw)
-
         options = data.get("options", [])
         if options: doc.add_paragraph("  ".join(options))
         doc.add_paragraph("")
-
     doc.add_page_break()
     doc.add_heading("정답 및 해설", level=1)
     for idx, data in enumerate(problems_list):
         p_ans = doc.add_paragraph()
         p_ans.add_run(f"{idx+1}번 - {data.get('answer', '')}").bold = True
         doc.add_paragraph(f"[해설] {data.get('explanation', '')}"); doc.add_paragraph("")
-
     buffer = BytesIO()
     doc.save(buffer)
     buffer.seek(0)
     return buffer
 
-# ==========================================
-# 💥 파이썬 1차 기계적 필터링 규칙
-# ==========================================
 def rule_based_check(task_type, prob_data):
     required_keys = ["question", "passage", "options", "answer", "explanation"]
     if not all(k in prob_data for k in required_keys): return False, "JSON 결함"
@@ -94,15 +83,11 @@ def rule_based_check(task_type, prob_data):
     if task_type == "순서" and len(prob_data.get("options", [])) < 3: return False, "순서 배열 선택지 부족"
     return True, "통과"
 
-# ==========================================
-# 💥 초고속 청크 생성 
-# ==========================================
 def process_chunk(chunk, exam_key, passage_db, model):
     prompt = "당신은 고등학교 내신 영어 출제 전문가입니다. 다음 [출제 목록]에 맞게 출제하세요.\n\n"
     for idx, task in enumerate(chunk):
         passage_text = passage_db[exam_key][task['q_num']]
         prompt += f"요청 {idx+1}. 지문: {task['q_num']}, 유형: {task['q_type']}\n원문: {passage_text}\n\n"
-    
     prompt += """[💥 출력 규칙 및 자가 검수 💥]
 1. 오직 순수 JSON 배열만 출력하세요. (마크다운 ```json 금지)
 2. 키: "question", "passage", "options", "answer", "explanation" 포함.
@@ -111,13 +96,11 @@ def process_chunk(chunk, exam_key, passage_db, model):
 5. 서술형 문제: <조건> 텍스트는 passage 맨 밑에 추가.
 6. 삽입 문제: 맨 앞에 [박스]주어진문장[/박스] 표기.
 [필수] 답변을 출력하기 직전, 위 6가지 규칙을 모두 완벽하게 지켰는지 스스로 검증한 후 결과물만 반환하세요."""
-
     for attempt in range(2): 
         try:
             response = model.generate_content(prompt)
             raw_text = response.text.strip().replace("```json", "").replace("```", "").strip()
             probs = json.loads(raw_text)
-            
             valid_probs = []
             for idx, prob in enumerate(probs):
                 if idx < len(chunk):
@@ -127,13 +110,9 @@ def process_chunk(chunk, exam_key, passage_db, model):
             return chunk, valid_probs, True
         except Exception as e:
             time.sleep(1.5)
-            
     failed_probs = [{"question": "[⚠️검수 실패] 수동 확인 요망", "passage": "생성 오류", "options": [], "answer": "1", "explanation": "재시도 요망"} for _ in chunk]
     return chunk, failed_probs, False
 
-# ==========================================
-# DB 관리
-# ==========================================
 DB_FILE = "sdh_passages_db.json"
 CACHE_FILE = "sdh_problems_cache_db.json"
 
@@ -164,7 +143,7 @@ else:
 
 
 # ==========================================
-# 🚀 1. 로그인 페이지 (첫 화면)
+# 🚀 1. 로그인 페이지 (권한 분리 로직 탑재)
 # ==========================================
 if st.session_state.page == 'login':
     st.markdown("<div style='margin-top: 100px;'></div>", unsafe_allow_html=True)
@@ -176,34 +155,50 @@ if st.session_state.page == 'login':
         id_input = st.text_input("ID")
         pw_input = st.text_input("PW", type="password")
         
-        st.write("") # 간격
+        st.write("") 
         if st.button("로그인", use_container_width=True, type="primary"):
-            st.session_state.page = 'main'
-            st.rerun()
-            
-        st.write("")
-        if st.button("관리자 모드", use_container_width=True):
-            st.session_state.page = 'admin'
-            st.rerun()
+            # 💥 원장님(최고 관리자) 계정
+            if id_input == "master" and pw_input == "1234":
+                st.session_state.role = 'admin'
+                st.session_state.page = 'main'
+                st.rerun()
+            # 💥 캠퍼스 강사진(일반 사용자) 계정
+            elif id_input in ["saerom_t", "boram_t"] and pw_input == "1111":
+                st.session_state.role = 'teacher'
+                st.session_state.page = 'main'
+                st.rerun()
+            else:
+                st.error("아이디 또는 비밀번호가 일치하지 않습니다.")
 
 # ==========================================
-# 🚀 2. 메인 페이지 (출제 화면)
+# 🚀 2. 메인 페이지 (출제 및 관리)
 # ==========================================
 elif st.session_state.page == 'main':
-    # 좌측 사이드바
+    
+    # --- 좌측 사이드바 구성 ---
     st.sidebar.markdown("### ⚙️ 출제 기본 설정")
     exam_type = st.sidebar.selectbox("교재 선택", ["고등 모의고사", "고등 교과서"])
     exam_year = st.sidebar.selectbox("연도", ["2026년", "2025년", "2024년"])
     exam_month = st.sidebar.selectbox("시행 월", ["3월", "6월", "9월", "11월"])
     exam_grade = st.sidebar.selectbox("학년", ["고1", "고2", "고3"])
     
+    exam_key = f"{exam_year}_{exam_month}_{exam_grade}"
+    if exam_key not in st.session_state.passage_db: st.session_state.passage_db[exam_key] = {}
+    
     st.sidebar.markdown("<br>", unsafe_allow_html=True)
-    if st.sidebar.button("GO!", use_container_width=True):
-        st.session_state.show_generator = True
+    
+    # 💥 권한(Role)에 따른 메뉴 동적 생성
+    menu_options = ["🎯 변형문제 제작"]
+    if st.session_state.role == 'admin':
+        menu_options.append("🗂️ 지문 DB 관리 (관리자)")
         
     st.sidebar.markdown("---")
-    if st.sidebar.button("🔙 로그아웃 (처음으로)", use_container_width=True):
+    selected_menu = st.sidebar.radio("📌 메뉴 이동", menu_options)
+    st.sidebar.markdown("---")
+    
+    if st.sidebar.button("🔙 로그아웃", use_container_width=True):
         st.session_state.page = 'login'
+        st.session_state.role = None
         st.session_state.show_generator = False
         st.rerun()
 
@@ -211,11 +206,10 @@ elif st.session_state.page == 'main':
     st.markdown("<h2 style='text-align: center;'>SDH ACADEMY 통합 출제 플랫폼 🛠️</h2>", unsafe_allow_html=True)
     st.markdown("<hr>", unsafe_allow_html=True)
 
-    exam_key = f"{exam_year}_{exam_month}_{exam_grade}"
-    if exam_key not in st.session_state.passage_db: st.session_state.passage_db[exam_key] = {}
-
-    # GO 버튼을 눌렀을 때만 출제 인터페이스 표시
-    if st.session_state.show_generator:
+    # ------------------------------------------
+    # 2-1. 변형문제 제작 화면
+    # ------------------------------------------
+    if selected_menu == "🎯 변형문제 제작":
         st.markdown(f"##### 📌 출제 대상: **{exam_year} {exam_month}, {exam_grade} 모의고사**")
         
         st.markdown("<div class='group-header'>📌 1. 출제할 세부 유형 선택</div>", unsafe_allow_html=True)
@@ -272,7 +266,7 @@ elif st.session_state.page == 'main':
                 missing_passages = [q for q in selected_q_nums if q not in current_db or current_db[q].strip() == ""]
                 
                 if missing_passages:
-                    st.error(f"🚨 다음 지문이 DB에 없습니다: {', '.join(missing_passages)}\n'관리자 모드'에서 먼저 지문을 등록해주세요.")
+                    st.error(f"🚨 다음 지문이 DB에 없습니다: {', '.join(missing_passages)}\n'지문 DB 관리 (관리자)' 메뉴에서 먼저 등록해주세요.")
                 else:
                     new_queue = [{"q_num": q, "q_type": t} for q in selected_q_nums for t in selected_types_list]
                     st.session_state.exam_queue = new_queue
@@ -414,61 +408,49 @@ elif st.session_state.page == 'main':
             else:
                 st.success("🎉 모든 대기열의 문제가 출제 완료되었습니다!")
 
-# ==========================================
-# 🚀 3. 관리자 모드 (지문 DB 관리)
-# ==========================================
-elif st.session_state.page == 'admin':
-    col1, col2 = st.columns([8, 2])
-    with col1:
-        st.markdown("## 🛠️ 관리자 모드: 지문 DB 등록 및 관리")
-    with col2:
-        if st.button("🔙 로그인 화면으로", use_container_width=True):
-            st.session_state.page = 'login'
-            st.rerun()
-            
-    st.markdown("---")
-    
-    admin_year = st.selectbox("DB 관리 연도", ["2026년", "2025년", "2024년"])
-    admin_month = st.selectbox("DB 관리 시행 월", ["3월", "6월", "9월", "11월"])
-    admin_grade = st.selectbox("DB 관리 학년", ["고1", "고2", "고3"])
-    
-    exam_key = f"{admin_year}_{admin_month}_{admin_grade}"
-    if exam_key not in st.session_state.passage_db: st.session_state.passage_db[exam_key] = {}
-
-    st.markdown("### 🚀 방법 1. 문제지 & 정답지 PDF 동시 업로드")
-    pdf_col1, pdf_col2 = st.columns(2)
-    with pdf_col1: uploaded_q_pdf = st.file_uploader("📝 문제지 PDF 업로드", type=["pdf"])
-    with pdf_col2: uploaded_a_pdf = st.file_uploader("💡 정답/해설지 PDF 업로드 (선택)", type=["pdf"])
-    
-    if uploaded_q_pdf is not None:
-        if st.button("✨ AI 정답 반영 지문 추출 및 DB 저장", type="primary"):
-            with st.spinner("순수 원문을 복원 중입니다..."):
-                try:
-                    q_reader = PyPDF2.PdfReader(uploaded_q_pdf)
-                    raw_q_text = "".join([page.extract_text() + "\n" for page in q_reader.pages])
-                    raw_a_text = "".join([page.extract_text() + "\n" for page in PyPDF2.PdfReader(uploaded_a_pdf).pages]) if uploaded_a_pdf else "정답지 없음."
-                    prompt = f"""고등학교 영어 지문 복원 전문가로서, 아래 텍스트에서 18~45번 지문을 복원해 JSON 형태로 출력하세요. 발문과 선택지는 지우고, 빈칸과 어법 오류는 정답을 반영해 완벽한 원문으로 만드세요. 밑줄과 번호 기호도 모두 삭제하세요.\n[문제지]\n{raw_q_text}\n\n[정답지]\n{raw_a_text}"""
-                    response = genai.GenerativeModel('gemini-3.6-flash').generate_content(prompt)
-                    res_text = response.text.strip().replace("```json", "").replace("```", "").strip()
-                    for q_num, passage in json.loads(res_text).items(): st.session_state.passage_db[exam_key][q_num] = passage
-                    save_json(DB_FILE, st.session_state.passage_db)
-                    st.success("🎉 DB 저장 완료!")
-                except Exception as e: st.error(f"오류: {e}")
+    # ------------------------------------------
+    # 2-2. 지문 DB 관리 화면 (Admin 전용)
+    # ------------------------------------------
+    elif selected_menu == "🗂️ 지문 DB 관리 (관리자)":
+        st.markdown(f"##### 🗂️ 현재 관리 중인 대상: **{exam_year} {exam_month}, {exam_grade}**")
+        
+        st.markdown("### 🚀 방법 1. 문제지 & 정답지 PDF 동시 업로드")
+        pdf_col1, pdf_col2 = st.columns(2)
+        with pdf_col1: uploaded_q_pdf = st.file_uploader("📝 문제지 PDF 업로드", type=["pdf"])
+        with pdf_col2: uploaded_a_pdf = st.file_uploader("💡 정답/해설지 PDF 업로드 (선택)", type=["pdf"])
+        
+        if uploaded_q_pdf is not None:
+            if st.button("✨ AI 정답 반영 지문 추출 및 DB 저장", type="primary"):
+                with st.spinner("순수 원문을 복원 중입니다..."):
+                    try:
+                        q_reader = PyPDF2.PdfReader(uploaded_q_pdf)
+                        raw_q_text = "".join([page.extract_text() + "\n" for page in q_reader.pages])
+                        raw_a_text = "".join([page.extract_text() + "\n" for page in PyPDF2.PdfReader(uploaded_a_pdf).pages]) if uploaded_a_pdf else "정답지 없음."
+                        prompt = f"""고등학교 영어 지문 복원 전문가로서, 아래 텍스트에서 18~45번 지문을 복원해 JSON 형태로 출력하세요. 발문과 선택지는 지우고, 빈칸과 어법 오류는 정답을 반영해 완벽한 원문으로 만드세요. 밑줄과 번호 기호도 모두 삭제하세요.\n[문제지]\n{raw_q_text}\n\n[정답지]\n{raw_a_text}"""
+                        response = genai.GenerativeModel('gemini-3.6-flash').generate_content(prompt)
+                        res_text = response.text.strip().replace("```json", "").replace("```", "").strip()
+                        for q_num, passage in json.loads(res_text).items(): st.session_state.passage_db[exam_key][q_num] = passage
+                        save_json(DB_FILE, st.session_state.passage_db)
+                        st.success("🎉 DB 저장 완료!")
+                    except Exception as e: st.error(f"오류: {e}")
+                    
+        st.markdown("---")
+        st.markdown("### ✍️ 방법 2. 개별 수동 등록 및 검수")
+        db_col1, db_col2 = st.columns([1, 2.5])
+        with db_col1:
+            target_q = st.selectbox("수정/검수할 지문 번호", [f"{q}번" for q in range(18, 46)])
+            existing_text = st.session_state.passage_db.get(exam_key, {}).get(target_q, "")
+            if existing_text: st.success("✅ 현재 DB에 복원된 지문이 있습니다.")
+            else: st.warning("❌ 등록된 지문이 없습니다.")
                 
-    st.markdown("---")
-    st.markdown("### ✍️ 방법 2. 개별 수동 등록 및 검수")
-    db_col1, db_col2 = st.columns([1, 2.5])
-    with db_col1:
-        target_q = st.selectbox("수정/검수할 지문 번호", [f"{q}번" for q in range(18, 46)])
-        existing_text = st.session_state.passage_db.get(exam_key, {}).get(target_q, "")
-        if existing_text: st.success("✅ 현재 DB에 복원된 지문이 있습니다.")
-        else: st.warning("❌ 등록된 지문이 없습니다.")
-            
-    with db_col2:
-        new_passage_text = st.text_area(f"{target_q} 지문 원문 (수동 수정 가능)", value=existing_text, height=250)
-        if st.button("💾 개별 지문 수정/저장"):
-            if new_passage_text.strip() == "": st.error("지문 내용을 입력해주세요.")
-            else:
-                st.session_state.passage_db[exam_key][target_q] = new_passage_text.strip()
-                save_json(DB_FILE, st.session_state.passage_db)
-                st.success(f"{target_q} 지문이 성공적으로 수정되었습니다!")
+        with db_col2:
+            new_passage_text = st.text_area(f"{target_q} 지문 원문 (수동 수정 가능)", value=existing_text, height=250)
+            if st.button("💾 개별 지문 수정/저장"):
+                if new_passage_text.strip() == "": st.error("지문 내용을 입력해주세요.")
+                else:
+                    st.session_state.passage_db[exam_key][target_q] = new_passage_text.strip()
+                    save_json(DB_FILE, st.session_state.passage_db)
+                    st.success(f"{target_q} 지문이 성공적으로 수정되었습니다!")
+
+st.markdown("---")
+st.markdown("<div style='text-align: center; color: gray; font-size: 12px;'>SDH Premium Decoding & Internal Exam System</div>", unsafe_allow_html=True)
