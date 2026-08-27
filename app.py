@@ -454,13 +454,12 @@ elif st.session_state.page == 'main':
         
         if uploaded_q_pdf is not None:
             if st.button("✨ AI 문맥 분석 및 DB 저장", type="primary"):
-                # 💥 40차 핵심: 모의고사만 중복 방지, 외부지문/교과서는 '무한 누적' 허용!
                 is_duplicate = len(st.session_state.passage_db.get(exam_key, {})) > 0
                 
                 if is_duplicate and not is_admin_ext:
                     st.error("🚨 이미 이 조건으로 등록된 모의고사가 있습니다. 중복(예: 53개 뻥튀기)을 막기 위해 하단 대시보드에서 기존 DB를 [삭제] 후 다시 올려주세요.")
                 else:
-                    with st.spinner("AI가 텍스트를 정제하고, 논리적 흐름에 맞춰 지문을 분리(추가)하고 있습니다..."):
+                    with st.spinner("AI가 텍스트를 정제하고, 지문을 분석(추출)하고 있습니다..."):
                         try:
                             raw_q_text = extract_text_from_file(uploaded_q_pdf)
                             raw_a_text = extract_text_from_file(uploaded_a_pdf) if uploaded_a_pdf else "정답지 없음."
@@ -485,13 +484,18 @@ elif st.session_state.page == 'main':
                             response = model.generate_content(prompt)
                             res_text = response.text.strip().replace("```json", "").replace("```", "").strip()
                             
-                            # 기존 딕셔너리에 새 파일에서 추출한 지문들을 그대로 '추가(update)'
-                            extracted_data = json.loads(res_text)
-                            for q_num, passage in extracted_data.items():
-                                st.session_state.passage_db[exam_key][q_num] = passage
+                            # 💥 JSON 파싱 에러 방어벽 (41차 핵심) 💥
+                            try:
+                                extracted_data = json.loads(res_text)
+                                for q_num, passage in extracted_data.items():
+                                    st.session_state.passage_db[exam_key][q_num] = passage
+                                    
+                                save_json(DB_FILE, st.session_state.passage_db)
+                                st.success("🎉 DB에 성공적으로 저장(추가)되었습니다! 하단 대시보드를 확인하세요.")
                                 
-                            save_json(DB_FILE, st.session_state.passage_db)
-                            st.success("🎉 DB에 성공적으로 저장(추가)되었습니다! 하단 대시보드를 확인하세요.")
+                            except json.JSONDecodeError:
+                                st.error("🚨 HWP 파일의 텍스트를 정상적으로 읽지 못해 AI가 표(JSON) 형식의 답변을 만들지 못했습니다. 번거로우시더라도 해당 문서를 한글 프로그램에서 'PDF로 저장'하신 후 PDF 파일로 다시 업로드해 주세요.")
+                                
                         except ValueError as e:
                             if "finish_reason" in str(e) and "4" in str(e): st.error("🚨 저작권 필터 차단됨. PDF로 변환해서 올려주세요.")
                             else: st.error(f"오류: {e}")
