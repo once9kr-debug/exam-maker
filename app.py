@@ -85,11 +85,19 @@ def create_word_file(problems_list, header_title):
         section.left_margin = Inches(0.6); section.right_margin = Inches(0.6)
     title = doc.add_heading(header_title, level=1); title.alignment = WD_ALIGN_PARAGRAPH.CENTER
     for idx, data in enumerate(problems_list):
-        # 발문(Question) 렌더링
-        q_title_text = data.get('question', '문제 누락').split('.', 1)[-1].strip() if '.' in data.get('question', '') else data.get('question', '')
-        p_q = doc.add_paragraph(); p_q.add_run(f"{idx+1}. {q_title_text}").bold = True
         
-        # 지문(Passage) 렌더링
+        # 💥 1. 발문(Question) 렌더링 - 비어있을 경우 안전장치 적용
+        q_raw = data.get('question', '').strip()
+        if not q_raw: q_raw = "다음 글을 읽고, 조건에 맞게 물음에 답하시오."
+        if '.' in q_raw and q_raw.split('.')[0].isdigit():
+            q_title_text = q_raw.split('.', 1)[-1].strip()
+        else:
+            q_title_text = q_raw
+            
+        p_q = doc.add_paragraph()
+        p_q.add_run(f"{idx+1}. {q_title_text}").bold = True
+        
+        # 💥 2. 지문(Passage) 렌더링
         passage_raw = data.get("passage", "").replace("<br/>", "\n").replace("<br>", "\n")
         if "[박스]" in passage_raw and "[/박스]" in passage_raw:
             try:
@@ -101,24 +109,27 @@ def create_word_file(problems_list, header_title):
             except: doc.add_paragraph(passage_raw)
         else: doc.add_paragraph(passage_raw)
         
-        # 💥 조건(Condition) 전용 박스 렌더링 (Word) 💥
+        # 💥 3. 조건(Condition) 박스 렌더링
         condition_raw = data.get("condition", "").strip()
         if condition_raw:
             condition_clean = condition_raw.replace("<조건>", "").replace("</조건>", "").strip()
             p_cond = doc.add_paragraph()
             p_cond.paragraph_format.space_before = Pt(5)
-            p_cond.paragraph_format.space_after = Pt(10)
-            p_cond.paragraph_format.line_spacing = 1.15 # 줄간격 축소
+            p_cond.paragraph_format.space_after = Pt(5)
+            p_cond.paragraph_format.line_spacing = 1.15
             p_cond.paragraph_format.left_indent = Inches(0.1)
+            p_cond.add_run("[조건]\n").bold = True
+            p_cond.runs[0].font.size = Pt(9)
+            p_cond.add_run(condition_clean).font.size = Pt(9)
             
-            run_title = p_cond.add_run("[조건]\n")
-            run_title.bold = True
-            run_title.font.size = Pt(9)
-            
-            run_text = p_cond.add_run(condition_clean)
-            run_text.font.size = Pt(9)
+        # 💥 4. 요약문 등 하단 텍스트(post_text) 렌더링
+        post_text_raw = data.get("post_text", "").strip()
+        if post_text_raw:
+            p_post = doc.add_paragraph()
+            p_post.paragraph_format.space_before = Pt(5)
+            p_post.add_run(post_text_raw).bold = True
         
-        # 선택지(Options) 렌더링
+        # 💥 5. 선택지(Options) 렌더링
         options = data.get("options", [])
         if options: doc.add_paragraph("  ".join(options))
         doc.add_paragraph("")
@@ -131,8 +142,7 @@ def create_word_file(problems_list, header_title):
     return buffer
 
 def rule_based_check(task_type, prob_data):
-    # 💥 필수 키에 "condition" 추가 (없더라도 에러 안 나게 get으로 처리)
-    if not all(k in prob_data for k in ["question", "passage", "condition", "options", "answer", "explanation"]): return False, "JSON 결함"
+    if not all(k in prob_data for k in ["question", "passage", "condition", "post_text", "options", "answer", "explanation"]): return False, "JSON 결함"
     passage = prob_data.get("passage", "")
     if task_type in ["어법", "어휘", "흐름(과 무관한 문장)"] and "①" not in passage: return False, "지문 내 번호(①) 누락"
     if task_type == "삽입" and "[박스]" not in passage: return False, "문장 [박스] 누락"
@@ -145,13 +155,13 @@ def process_chunk(chunk, exam_key, passage_db, model):
         prompt += f"요청 {idx+1}. 지문(이름): {task['q_num']}, 세부유형: {task['q_type']}, 출제형태: {task['q_format']}\n원문: {passage_text}\n\n"
     prompt += """[💥 출력 규칙 및 자가 검수 💥]
 1. 오직 순수 JSON 배열만 출력하세요. (마크다운 금지)
-2. 필수 키: "question", "passage", "condition", "options", "answer", "explanation"
-3. "question": (예: "다음 글을 읽고, 밑줄 친 부분을 조건에 맞게 영어로 영작하시오.") 학생이 무엇을 해야 하는지 묻는 명확한 '발문(지시문)'을 반드시 완전한 문장으로 작성하세요. 절대 빈칸으로 두지 마세요.
-4. "condition": 주관식(서술형)의 채점 기준이나 제한사항(예: "10단어 이내로 쓸 것", "주어진 단어를 배열할 것")만 따로 분리해서 작성하세요. 조건이 없다면 빈 문자열("")을 넣으세요. 절대로 passage 안에 조건을 섞어 넣지 마세요.
-5. "passage": 원문 텍스트만 순수하게 들어갑니다.
-6. 출제 언어 다양화: 주관식 출제 시 '글의 요지나 이유를 우리말(한글)로 서술하는 문제'와 '주어진 단어를 활용해 영어로 영작(배열)하는 문제'를 지문 특성에 맞게 골고루 섞어서 출제하세요.
+2. 필수 키: "question", "passage", "condition", "post_text", "options", "answer", "explanation"
+3. "question": (예: "다음 글의 빈칸에 들어갈 알맞은 말을 조건에 맞게 쓰시오.") 학생이 무엇을 해야 하는지 묻는 명확한 '발문'을 반드시 작성하세요. 절대 비워두지 마세요.
+4. "condition": 주관식(서술형)의 채점 기준이나 제한사항(예: "주어진 단어를 모두 사용할 것"). 없으면 "".
+5. "post_text": 지문과 <조건> 박스 **아래에** 제시되어야 할 텍스트입니다. (예: "[요약문] According to the passage, ____.") 완성해야 할 요약문이나 뼈대 문장, 하단 빈칸 문장이 있다면 반드시 여기에 넣으세요. 없으면 "".
+6. "passage": 원문 텍스트만 순수하게 들어갑니다. (요약문이나 조건문 등을 여기에 섞지 마세요)
 7. [출제형태: 객관식 전용]인 경우 options 배열에 5개 선택지 제공.
-8. [출제형태: 주관식(서술형) 전용]인 경우 options는 [].
+8. [출제형태: 주관식(서술형) 전용]인 경우 options는 []. 주관식은 '한글 서술'과 '영어 영작/배열'을 골고루 섞어 출제하세요.
 9. [출제형태: 객관식+주관식 혼합]은 위 두 형태를 섞어서 출제.
 10. 삽입 문제: 맨 앞에 [박스]주어진문장[/박스] 표기.
 [필수] 결과물 출력 전 위 규칙들을 완벽히 지켰는지 자가 검증하세요."""
@@ -168,7 +178,7 @@ def process_chunk(chunk, exam_key, passage_db, model):
                     valid_probs.append(prob)
             return chunk, valid_probs, True
         except Exception as e: time.sleep(1.5)
-    return chunk, [{"question": "[⚠️검수 실패] 수동 확인 요망", "passage": "생성 오류", "condition": "", "options": [], "answer": "1", "explanation": "재시도 요망"} for _ in chunk], False
+    return chunk, [{"question": "[⚠️검수 실패] 수동 확인 요망", "passage": "생성 오류", "condition": "", "post_text": "", "options": [], "answer": "1", "explanation": "재시도 요망"} for _ in chunk], False
 
 DB_FILE = "sdh_passages_db.json"
 CACHE_FILE = "sdh_problems_cache_db.json"
@@ -403,8 +413,15 @@ elif st.session_state.page == 'main':
                         questions_html = ""
                         answers_html = ""
                         for idx, data in enumerate(all_generated_problems):
-                            q_title = f"{idx+1}. {data.get('question', '문제 누락').split('.', 1)[-1].strip() if '.' in data.get('question', '') else data.get('question', '')}"
                             
+                            # 발문 (비어있으면 기본값 세팅)
+                            q_raw = data.get('question', '').strip()
+                            if not q_raw: q_raw = "다음 글을 읽고, 조건에 맞게 물음에 답하시오."
+                            if '.' in q_raw and q_raw.split('.')[0].isdigit():
+                                q_title = f"{idx+1}. {q_raw.split('.', 1)[-1].strip()}"
+                            else:
+                                q_title = f"{idx+1}. {q_raw}"
+                                
                             passage_raw = data.get("passage", "")
                             if "[박스]" in passage_raw and "[/박스]" in passage_raw:
                                 inserted_box = passage_raw.split("[박스]")[1].split("[/박스]")[0]
@@ -412,12 +429,18 @@ elif st.session_state.page == 'main':
                                 passage_html = f'<div class="inserted-box">{inserted_box}</div><div class="passage-box">{main_passage}</div>'
                             else: passage_html = f'<div class="passage-box">{passage_raw}</div>'
                             
-                            # 💥 조건(Condition) 전용 박스 렌더링 (HTML) 💥
+                            # 💥 조건 박스 렌더링
                             condition_raw = data.get("condition", "").strip()
                             condition_html = ""
                             if condition_raw and condition_raw != '""':
                                 condition_clean = condition_raw.replace("<조건>", "").replace("</조건>", "").strip()
                                 condition_html = f'<div class="condition-box"><div class="condition-title">[조건]</div>{condition_clean}</div>'
+                                
+                            # 💥 요약문 등 하단 텍스트(post_text) 렌더링
+                            post_text_raw = data.get("post_text", "").strip()
+                            post_text_html = ""
+                            if post_text_raw and post_text_raw != '""':
+                                post_text_html = f'<div class="post-text-box"><b>{post_text_raw}</b></div>'
                                 
                             options_html = ""
                             options = data.get("options", [])
@@ -426,7 +449,7 @@ elif st.session_state.page == 'main':
                                 for opt in options: options_html += f'<div class="option-item">{opt}</div>'
                                 options_html += '</div>'
                                 
-                            questions_html += f'<div class="question-block"><div class="question-title">{q_title}</div>{passage_html}{condition_html}{options_html}</div>'
+                            questions_html += f'<div class="question-block"><div class="question-title">{q_title}</div>{passage_html}{condition_html}{post_text_html}{options_html}</div>'
                             answers_html += f'<div class="answer-block"><b>{idx+1}번 - {data.get("answer", "")}</b><br/><b>[해설]</b> {data.get("explanation", "")}</div>'
 
                         header_title = f"{title_disp} 변형문제 (Part {st.session_state.part_counter})"
@@ -445,9 +468,9 @@ elif st.session_state.page == 'main':
                             .passage-box {{ border: 1.2px solid #000; padding: 8px 10px; margin: 5px 0; background-color: #fff; text-align: justify; word-break: normal; overflow-wrap: break-word; }}
                             .inserted-box {{ border: 1.5px solid #555; padding: 7px; margin-bottom: 8px; text-align: justify; word-break: normal; background-color: #f9f9f9; }}
                             
-                            /* 💥 조건 박스 CSS 디자인 추가 */
                             .condition-box {{ border: 1.5px dashed #7F8C8D; padding: 8px 10px; margin-top: 5px; background-color: #FDFEFE; line-height: 1.3; font-size: 9pt; }}
                             .condition-title {{ font-weight: bold; color: #E74C3C; margin-bottom: 4px; }}
+                            .post-text-box {{ margin-top: 8px; font-size: 10pt; padding-left: 5px; line-height: 1.4; }}
                             
                             .options-container {{ margin-top: 8px; }} .option-item {{ display: inline-block; margin-right: 15px; margin-bottom: 4px; }}
                             .answers-section {{ break-before: page; page-break-before: always; margin-top: 30px; }}
