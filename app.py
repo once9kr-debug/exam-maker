@@ -120,7 +120,7 @@ else:
         if st.button("📥 HWP/Docx 다운로드", type="primary"): st.success("다운로드 완료!")
         st.markdown("<div class='exam4you-viewer'>여기에 DB에서 꺼낸 문제가 출력됩니다.</div>", unsafe_allow_html=True)
 
-    # --- 화면 4: 관리자 모드 (AI 심야 일괄 출제) ---
+    # --- 화면 4: 관리자 모드 (AI 심야 일괄 출제 엔진) ---
     elif st.session_state.current_page == "admin":
         st.subheader("⚙️ 관리자 모드 - AI 심야 일괄 출제 엔진")
         st.info("원장님, 이곳에서 Gemini API 키를 넣고 18~45번 지문 일괄 출제를 돌리면 DB에 영구 저장됩니다.")
@@ -134,35 +134,35 @@ else:
             else:
                 with st.spinner("AI가 지문을 분석하고 빈칸 추론 문제를 생성하는 중입니다... (약 5초 소요)"):
                     try:
-                        # 1. Gemini 엔진 세팅 (최신 빠르고 저렴한 1.5 flash 모델 사용)
                         genai.configure(api_key=api_key)
-                        model = genai.GenerativeModel('gemini-1.5-flash')
+                        
+                        # 가장 안정적으로 최신 flash 모델을 호출하는 표준 방식
+                        generation_config = {"response_mime_type": "application/json"}
+                        model = genai.GenerativeModel(
+                            model_name='gemini-1.5-flash',
+                            generation_config=generation_config
+                        )
                         
                         dummy_passage = "Dear Residents, I am Trixie Mitchell, the director of the Riverside Community Center..."
                         
-                        # 2. AI에게 내릴 강력한 족쇄 프롬프트 (JSON 강제)
                         prompt = f"""
-                        당신은 한국의 고등학교 영어 내신 출제 전문가입니다.
-                        다음 지문을 읽고, '빈칸 추론' 문제 1개를 만들어주세요.
-                        반드시 아래 JSON 형식으로만 출력해야 합니다.
+                        다음 영어 지문을 읽고 고등학교 내신 '빈칸 추론' 문제 1개를 만들어주세요.
+                        반드시 아래 JSON 키값 구조를 정확히 지켜서 결과만 출력하세요.
                         {{
                             "q_type": "빈칸 추론",
                             "difficulty": "중",
                             "question": "다음 글의 빈칸에 들어갈 말로 가장 적절한 것은?",
-                            "passage": "빈칸이 뚫린 지문 내용",
-                            "options": ["보기1", "보기2", "보기3", "보기4", "보기5"],
-                            "answer": "정답번호(1~5)",
-                            "explanation": "정답인 이유 해설"
+                            "passage": "{dummy_passage}",
+                            "options": ["① 보기원문1", "② 보기원문2", "③ 보기원문3", "④ 보기원문4", "⑤ 보기원문5"],
+                            "answer": "1",
+                            "explanation": "여기에 상세 해설 작성"
                         }}
-                        지문: {dummy_passage}
                         """
                         
-                        # 3. AI 호출
                         response = model.generate_content(prompt)
-                        result_text = response.text.replace('```json', '').replace('```', '').strip()
-                        ai_data = json.loads(result_text)
+                        ai_data = json.loads(response.text)
                         
-                        # 4. 생성된 데이터를 SQLite DB에 저장 (무한 캐싱)
+                        # SQLite DB 저장
                         conn = get_db_connection()
                         c = conn.cursor()
                         c.execute("""INSERT OR IGNORE INTO questions_cache 
@@ -173,8 +173,8 @@ else:
                         conn.commit()
                         conn.close()
                         
-                        st.success("✅ AI 출제 및 DB 저장이 완벽하게 완료되었습니다! 이제 강사들은 이 문제를 0초 만에 무료로 뽑아 쓸 수 있습니다.")
-                        st.json(ai_data) # AI가 만든 결과물 화면에 확인용으로 출력
+                        st.success("✅ AI 출제 및 DB 저장이 완벽하게 완료되었습니다!")
+                        st.json(ai_data)
                         
                     except Exception as e:
                         st.error(f"출제 중 오류가 발생했습니다: {e}")
