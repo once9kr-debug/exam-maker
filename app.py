@@ -178,7 +178,6 @@ def rule_based_check(task_type, prob_data):
     return True, "통과"
 
 def process_chunk(chunk, exam_key, passage_db, history_db, pattern_db, model):
-    # 💥 프롬프트 전면 개편 (Flash 제어용 철통 방어막) 💥
     prompt = "당신은 최고 수준의 고등학교 영어 출제위원입니다. 아래의 엄격한 [출제 행동 강령]을 무조건 준수하여 출제하세요.\n\n"
     
     prompt += """[💥 필수: 지문 장르 논리성 검수 💥]
@@ -444,8 +443,8 @@ elif st.session_state.page == 'main':
                         cached_results = {}
                         tasks_to_process = []
                         for i, task in enumerate(current_batch):
-                            # 💥 v12 업데이트 (강력한 프롬프트 결합된 Flash)
-                            cache_key = f"v12_{exam_key}_{task['q_num']}_{task['q_type']}_{task['q_format']}_{task['q_difficulty']}_{i}"
+                            # 💥 v13 업데이트 (Flash 엔진 복귀명칭 적용)
+                            cache_key = f"v13_{exam_key}_{task['q_num']}_{task['q_type']}_{task['q_format']}_{task['q_difficulty']}_{i}"
                             if not task['exclude_history'] and cache_key in st.session_state.problem_cache: 
                                 cached_results[cache_key] = st.session_state.problem_cache[cache_key]
                             else: 
@@ -454,8 +453,8 @@ elif st.session_state.page == 'main':
                         progress_bar = st.progress(0)
                         status_text = st.empty()
                         
-                        # 💥 다시 빠르고 가성비 좋은 Flash 모델로 회귀 💥
-                        model = genai.GenerativeModel('gemini-1.5-flash')
+                        # 💥 범용성 높은 최신 Flash 이름 적용 💥
+                        model = genai.GenerativeModel('gemini-1.5-flash-latest')
                         
                         if tasks_to_process:
                             chunk_size = 2 
@@ -473,7 +472,7 @@ elif st.session_state.page == 'main':
                                         if idx < len(probs):
                                             prob_result = probs[idx]
                                             original_index = original_chunk_with_index[idx][0]
-                                            cache_key = f"v12_{exam_key}_{task['q_num']}_{task['q_type']}_{task['q_format']}_{task['q_difficulty']}_{original_index}"
+                                            cache_key = f"v13_{exam_key}_{task['q_num']}_{task['q_type']}_{task['q_format']}_{task['q_difficulty']}_{original_index}"
                                             st.session_state.problem_cache[cache_key] = prob_result
                                             cached_results[cache_key] = prob_result
                                             
@@ -497,7 +496,7 @@ elif st.session_state.page == 'main':
                         
                         all_generated_problems = []
                         for i, task in enumerate(current_batch):
-                            cache_key = f"v12_{exam_key}_{task['q_num']}_{task['q_type']}_{task['q_format']}_{task['q_difficulty']}_{i}"
+                            cache_key = f"v13_{exam_key}_{task['q_num']}_{task['q_type']}_{task['q_format']}_{task['q_difficulty']}_{i}"
                             if cache_key in cached_results: all_generated_problems.append(cached_results[cache_key])
                         
                         questions_html = ""
@@ -639,7 +638,7 @@ elif st.session_state.page == 'main':
                                 prompt = f"""[Task] 아래 [원문]의 끝까지 단락을 나누어 JSON 객체로 출력하세요. {prefix_inst}
 [원문]\n{raw_q_text}\n[정답지]\n{raw_a_text}"""
 
-                            model = genai.GenerativeModel('gemini-1.5-flash')
+                            model = genai.GenerativeModel('gemini-1.5-flash-latest')
                             response = model.generate_content(prompt)
                             res_text = response.text.strip().replace("```json", "").replace("```", "").strip()
                             
@@ -665,7 +664,7 @@ elif st.session_state.page == 'main':
         if pattern_files:
             if st.button("🧠 기출 패턴 일괄 학습 시작", type="primary"):
                 with st.spinner(f"총 {len(pattern_files)}개의 기출문제 파일에서 출제 패턴과 난이도를 분석하고 있습니다..."):
-                    model = genai.GenerativeModel('gemini-1.5-flash')
+                    model = genai.GenerativeModel('gemini-1.5-flash-latest')
                     extracted_count = 0
                     
                     for p_file in pattern_files:
