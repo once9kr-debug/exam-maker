@@ -51,7 +51,7 @@ if 'problem_cache' not in st.session_state: st.session_state.problem_cache = loa
 if 'history_db' not in st.session_state: st.session_state.history_db = load_json(HISTORY_DB_FILE)
 if 'pattern_db' not in st.session_state: st.session_state.pattern_db = load_json(PATTERN_DB_FILE)
 
-# 💥 43-45번 분할 지문 강제 통합 (Migration) 로직 💥
+# 💥 43-45번 분할 지문 강제 통합 (Migration) 청소 로직 💥
 db_migrated = False
 for exam_k, passages in st.session_state.passage_db.items():
     if any(k in passages for k in ['43번', '44번', '45번']):
@@ -90,7 +90,7 @@ GRADES_LIST = ["고1", "고2", "고3"]
 MATERIAL_LIST = ["고등 모의고사", "고등 교과서", "외부지문"]
 
 # ==========================================
-# 문서 추출 및 엔진 함수들
+# 문서 추출 및 Word 렌더링 엔진
 # ==========================================
 def extract_text_from_file(file_obj):
     if file_obj is None: return "정답지 없음."
@@ -138,9 +138,11 @@ def create_word_file(problems_list, header_title):
             except: doc.add_paragraph(passage_raw)
         else: doc.add_paragraph(passage_raw)
         
+        # 💥 조건 박스 줄바꿈 처리 💥
         condition_raw = data.get("condition", "").strip()
         if condition_raw:
             condition_clean = condition_raw.replace("<조건>", "").replace("</조건>", "").strip()
+            condition_clean = re.sub(r'\s+(\d\.)', r'\n\1', condition_clean).strip() # 1. 2. 3. 앞에서 줄바꿈
             p_cond = doc.add_paragraph()
             p_cond.paragraph_format.space_before = Pt(5); p_cond.paragraph_format.space_after = Pt(5); p_cond.paragraph_format.line_spacing = 1.15; p_cond.paragraph_format.left_indent = Inches(0.1)
             p_cond.add_run("[조건]\n").bold = True; p_cond.runs[0].font.size = Pt(9)
@@ -150,14 +152,27 @@ def create_word_file(problems_list, header_title):
         if post_text_raw:
             p_post = doc.add_paragraph(); p_post.paragraph_format.space_before = Pt(5); p_post.add_run(post_text_raw).bold = True
         
+        # 💥 선택지 양쪽 정렬 및 서술형 여백 확보 💥
         options = data.get("options", [])
-        if options: doc.add_paragraph("  ".join(options))
-        doc.add_paragraph("")
-        
+        if options: 
+            for opt in options:
+                p_opt = doc.add_paragraph(opt)
+                p_opt.paragraph_format.left_indent = Inches(0.2)
+                p_opt.paragraph_format.first_line_indent = Inches(-0.2)
+                p_opt.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY # 영어 지문처럼 양쪽 정렬
+        else:
+            for _ in range(4): doc.add_paragraph("") # 서술형 빈 공간 4줄 추가
+            
     doc.add_page_break(); doc.add_heading("정답 및 해설", level=1)
     for idx, data in enumerate(problems_list):
         p_ans = doc.add_paragraph(); p_ans.add_run(f"{idx+1}번 - {data.get('answer', '')}").bold = True
-        doc.add_paragraph(f"[해설] {data.get('explanation', '')}"); doc.add_paragraph("")
+        
+        # 💥 해설지 특정 태그 자동 줄바꿈 💥
+        exp_text = data.get('explanation', '')
+        exp_text = re.sub(r'(\[오답.*?\])', r'\n\1', exp_text)
+        exp_text = re.sub(r'(\[단어.*?\])', r'\n\1', exp_text)
+        
+        doc.add_paragraph(f"[해설] {exp_text.strip()}"); doc.add_paragraph("")
     buffer = BytesIO(); doc.save(buffer); buffer.seek(0)
     return buffer
 
@@ -198,23 +213,25 @@ def process_chunk(chunk, exam_key, passage_db, history_db, pattern_db, model):
             
         prompt += f"원문: {passage_text}\n\n"
     
+    # 💥 <보기> 제시어 누락(환각) 방지 및 AI 투트랙 검수 지시어 추가 💥
     prompt += """[💥 출력 구조 및 AI 자가 검수(Validator) 규칙 💥]
-1. 객관식은 반드시 정답이 1개여야 하며, 복수 정답의 여지가 없도록 스스로 논리를 2번 검증하세요.
+1. 객관식은 반드시 정답이 1개여야 하며, 복수 정답의 여지가 없도록 논리를 2번 검증하세요.
 2. 주관식 서술형일 경우 options 배열은 반드시 비워둡니다([]).
-3. 아래의 JSON 배열 형식을 100% 엄격하게 준수하여 출력하세요.
+3. 🚨필수(환각 방지): <조건>에 '<보기>에 주어진 단어를 사용할 것' 등 제시어 사용 조건이 있다면, "post_text" 칸에 반드시 [보기] 단어 목록을 지어내서 나열하세요. (예: [보기] profound / empathy / insight ...)
+4. 아래의 JSON 배열 형식을 100% 엄격하게 준수하여 출력하세요.
 [
   {
     "question": "다음 글의 ~로 알맞은 것은? (지시문만 짧게 기재)",
     "passage": "영어 원문만 기재",
     "condition": "서술형 조건 (객관식이면 \"\")",
-    "post_text": "[요약문] 빈칸 문장이나 하단 텍스트 (없으면 \"\")",
+    "post_text": "[요약문] 또는 [보기] 단어 제시 영역 (없으면 \"\")",
     "options": ["①...", "②..."],
     "answer": "정답",
     "explanation": "해설"
   }
 ]"""
     
-    # 💥 지능형 과속 방지기 (Exponential Backoff) 도입
+    # 지능형 과속 방지기 (Exponential Backoff)
     wait_times = [4, 8, 15, 30] 
     
     for attempt in range(4): 
@@ -235,7 +252,7 @@ def process_chunk(chunk, exam_key, passage_db, history_db, pattern_db, model):
                     if not is_ok: raise ValueError(msg)
                     
                     q_text = prob.get("question", "")
-                    match_q = re.search(r'\[요약문\]|<요약문>|【요약문】', q_text)
+                    match_q = re.search(r'\[요약문\]|<요약문>|【요약문】|\[보기\]|<보기>', q_text)
                     if match_q:
                         split_idx = match_q.start()
                         prob["post_text"] = (q_text[split_idx:].strip() + "\n" + prob.get("post_text", "").strip()).strip()
@@ -248,8 +265,7 @@ def process_chunk(chunk, exam_key, passage_db, history_db, pattern_db, model):
                         prob["condition"] = (p_text[split_idx:].replace("<조건>", "").replace("[조건]", "").strip() + "\n" + prob.get("condition", "").strip()).strip()
                         prob["passage"] = p_text[:split_idx].strip()
 
-                    if "주관식" in chunk[idx]['q_format']:
-                        prob["options"] = [] 
+                    if "주관식" in chunk[idx]['q_format']: prob["options"] = [] 
 
                     valid_probs.append(prob)
             return chunk, valid_probs, True
@@ -257,7 +273,7 @@ def process_chunk(chunk, exam_key, passage_db, history_db, pattern_db, model):
         except Exception as e: 
             error_details = str(e)
             if attempt < 3:
-                time.sleep(wait_times[attempt]) # 과부하 시 점진적 휴식
+                time.sleep(wait_times[attempt]) 
             else:
                 return chunk, [{"question": "[⚠️검수 실패] API 통신 또는 구조 오류", "passage": "문제를 생성하는 도중 한계에 도달했습니다.", "condition": "", "post_text": "", "options": [], "answer": "1", "explanation": f"오류 원인: {error_details}"} for _ in chunk], False
         
@@ -281,7 +297,7 @@ if "GEMINI_API_KEY" in st.secrets: genai.configure(api_key=st.secrets["GEMINI_AP
 else: st.error("API 키가 설정되지 않았습니다."); st.stop()
 
 # ==========================================
-# 🚀 1. 로그인 페이지
+# 🚀 메인 렌더링 영역
 # ==========================================
 if st.session_state.page == 'login':
     st.markdown("<div style='margin-top: 100px;'></div>", unsafe_allow_html=True)
@@ -299,9 +315,6 @@ if st.session_state.page == 'login':
                 st.session_state.role = 'teacher'; st.session_state.page = 'main'; st.rerun()
             else: st.error("아이디 또는 비밀번호가 일치하지 않습니다.")
 
-# ==========================================
-# 🚀 2. 메인 페이지
-# ==========================================
 elif st.session_state.page == 'main':
     
     st.sidebar.markdown("### 📌 메뉴 이동")
@@ -319,9 +332,6 @@ elif st.session_state.page == 'main':
     st.markdown("<h2 style='text-align: center;'>SDH ACADEMY 통합 출제 플랫폼 🛠️</h2>", unsafe_allow_html=True)
     st.markdown("<hr>", unsafe_allow_html=True)
 
-    # ------------------------------------------
-    # 2-1. 변형문제 제작 화면
-    # ------------------------------------------
     if st.session_state.current_menu == "🎯 변형문제 제작":
         st.markdown("### ⚙️ 출제 기본 설정")
         col_set1, col_set2, col_set3, col_set4, col_set5 = st.columns([1.2, 1, 1, 1, 1])
@@ -391,8 +401,6 @@ elif st.session_state.page == 'main':
             queue_col1, queue_col2 = st.columns(2)
             with queue_col1:
                 sort_order = st.radio("🔄 출제 정렬 기준", ["지문 순서대로 (예: 18번 지문으로 모든 유형 출제 후 19번으로)", "문제 유형 순서대로 (예: 전체 지문의 주제 유형 출제 후 어법으로)"])
-                
-                # 💥 1유형당 출제할 배수(Multiplier) 옵션 💥
                 q_multiplier = st.number_input("✖️ 1개 지문+유형당 출제할 문항 수 (기본 1문제)", min_value=1, max_value=5, value=1, step=1)
                 
             with queue_col2:
@@ -424,11 +432,10 @@ elif st.session_state.page == 'main':
                     st.warning("유형과 지문을 최소 1개 이상 선택해주세요.")
                 else:
                     new_queue = []
-                    
                     if "지문 순서" in sort_order:
                         for q in selected_q_nums:
                             for t in selected_types_list:
-                                for _ in range(q_multiplier): # 배수만큼 큐 복제
+                                for _ in range(q_multiplier):
                                     assigned_format = random.choice(["객관식 전용", "주관식(서술형) 전용"]) if exam_format == "객관식+주관식 혼합" else exam_format
                                     new_queue.append({"q_num": q, "q_type": t, "q_format": assigned_format, "exclude_history": exclude_history, "q_difficulty": exam_diff})
                     else:
@@ -460,13 +467,13 @@ elif st.session_state.page == 'main':
                 
                 if remain_tasks > 0:
                     target_amount = min(split_size, remain_tasks)
-                    if st.button(f"🚀 2단계: Part {st.session_state.part_counter} 초고속 출제 시작 ({target_amount}문제)", type="primary", use_container_width=True):
+                    if st.button(f"🚀 2단계: Part {st.session_state.part_counter} 지능형 출제 시작 ({target_amount}문제)", type="primary", use_container_width=True):
                         current_batch = st.session_state.exam_queue[:target_amount]
                         cached_results = {}
                         tasks_to_process = []
                         for i, task in enumerate(current_batch):
-                            # N배수 출제 시 캐시 키 충돌 방지를 위해 인덱스 추가 (v7 업데이트)
-                            cache_key = f"v7_{exam_key}_{task['q_num']}_{task['q_type']}_{task['q_format']}_{task['q_difficulty']}_{i}"
+                            # 캐시 키 v8 업데이트 (최신 프롬프트 강제화)
+                            cache_key = f"v8_{exam_key}_{task['q_num']}_{task['q_type']}_{task['q_format']}_{task['q_difficulty']}_{i}"
                             if not task['exclude_history'] and cache_key in st.session_state.problem_cache: 
                                 cached_results[cache_key] = st.session_state.problem_cache[cache_key]
                             else: 
@@ -483,7 +490,6 @@ elif st.session_state.page == 'main':
                             completed_chunks = 0
                             
                             with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
-                                # 튜플 리스트에서 task만 분리하여 함수 전달
                                 future_to_chunk = {executor.submit(process_chunk, [item[1] for item in c], exam_key, st.session_state.passage_db, st.session_state.history_db, st.session_state.pattern_db, model): c for c in chunks}
                                 for future in concurrent.futures.as_completed(future_to_chunk):
                                     original_chunk_with_index = future_to_chunk[future]
@@ -493,7 +499,7 @@ elif st.session_state.page == 'main':
                                         if idx < len(probs):
                                             prob_result = probs[idx]
                                             original_index = original_chunk_with_index[idx][0]
-                                            cache_key = f"v7_{exam_key}_{task['q_num']}_{task['q_type']}_{task['q_format']}_{task['q_difficulty']}_{original_index}"
+                                            cache_key = f"v8_{exam_key}_{task['q_num']}_{task['q_type']}_{task['q_format']}_{task['q_difficulty']}_{original_index}"
                                             st.session_state.problem_cache[cache_key] = prob_result
                                             cached_results[cache_key] = prob_result
                                             
@@ -508,8 +514,6 @@ elif st.session_state.page == 'main':
                                     progress = min(1.0, completed_chunks / total_chunks)
                                     progress_bar.progress(progress)
                                     status_text.text(f"⚡ 지능형 출제 중... API 과부하 차단 회피 작동 (총 {total_chunks}구간 중 {completed_chunks}구간 완료)")
-                                    
-                                    # 💥 API 호출 사이 딜레이 추가 (과속 완벽 억제)
                                     time.sleep(1.0)
                                     
                             save_json(CACHE_FILE, st.session_state.problem_cache)
@@ -517,12 +521,10 @@ elif st.session_state.page == 'main':
                         
                         status_text.text(f"✅ Part {st.session_state.part_counter} 지능형 출제 완료! 렌더링 중...")
                         
-                        # 렌더링 시 원래 순서 유지
                         all_generated_problems = []
                         for i, task in enumerate(current_batch):
-                            cache_key = f"v7_{exam_key}_{task['q_num']}_{task['q_type']}_{task['q_format']}_{task['q_difficulty']}_{i}"
-                            if cache_key in cached_results:
-                                all_generated_problems.append(cached_results[cache_key])
+                            cache_key = f"v8_{exam_key}_{task['q_num']}_{task['q_type']}_{task['q_format']}_{task['q_difficulty']}_{i}"
+                            if cache_key in cached_results: all_generated_problems.append(cached_results[cache_key])
                         
                         questions_html = ""
                         answers_html = ""
@@ -540,10 +542,12 @@ elif st.session_state.page == 'main':
                                 passage_html = f'<div class="inserted-box">{inserted_box}</div><div class="passage-box">{main_passage}</div>'
                             else: passage_html = f'<div class="passage-box">{passage_raw}</div>'
                             
+                            # 💥 조건 박스 줄바꿈 처리 (HTML) 💥
                             condition_raw = data.get("condition", "").strip()
                             condition_html = ""
                             if condition_raw and condition_raw != '""':
                                 condition_clean = condition_raw.replace("<조건>", "").replace("</조건>", "").strip()
+                                condition_clean = re.sub(r'\s+(\d\.)', r'<br>\1', condition_clean).strip()
                                 condition_html = f'<div class="condition-box"><div class="condition-title">[조건]</div>{condition_clean}</div>'
                                 
                             post_text_raw = data.get("post_text", "").strip()
@@ -551,15 +555,25 @@ elif st.session_state.page == 'main':
                             if post_text_raw and post_text_raw != '""':
                                 post_text_html = f'<div class="post-text-box"><b>{post_text_raw}</b></div>'
                                 
+                            # 💥 선택지 양쪽 정렬 및 서술형 여백 확보 (HTML) 💥
                             options_html = ""
                             options = data.get("options", [])
                             if options:
                                 options_html += '<div class="options-container">'
                                 for opt in options: options_html += f'<div class="option-item">{opt}</div>'
                                 options_html += '</div>'
+                            else:
+                                options_html += '<div class="subjective-space"><br><br><br><br></div>'
                                 
                             questions_html += f'<div class="question-block"><div class="question-title">{q_title}</div>{passage_html}{condition_html}{post_text_html}{options_html}</div>'
-                            answers_html += f'<div class="answer-block"><b>{idx+1}번 - {data.get("answer", "")}</b><br/><b>[해설]</b> {data.get("explanation", "")}</div>'
+                            
+                            # 💥 해설지 태그 앞 자동 줄바꿈 (HTML) 💥
+                            exp_text = data.get("explanation", "")
+                            exp_text = re.sub(r'(\[오답.*?\])', r'<br><br>\1', exp_text)
+                            exp_text = re.sub(r'(\[단어.*?\])', r'<br><br>\1', exp_text)
+                            exp_text = exp_text.strip()
+                            
+                            answers_html += f'<div class="answer-block"><b>{idx+1}번 - {data.get("answer", "")}</b><br/><b>[해설]</b> {exp_text}</div>'
 
                         header_title = f"{title_disp} 변형문제 (Part {st.session_state.part_counter})"
                         html_content = f'''
@@ -579,7 +593,9 @@ elif st.session_state.page == 'main':
                             .condition-box {{ border: 1.5px dashed #7F8C8D; padding: 8px 10px; margin-top: 5px; background-color: #FDFEFE; line-height: 1.3; font-size: 9pt; }}
                             .condition-title {{ font-weight: bold; color: #E74C3C; margin-bottom: 4px; }}
                             .post-text-box {{ margin-top: 8px; font-size: 10pt; padding-left: 5px; line-height: 1.4; }}
-                            .options-container {{ margin-top: 8px; }} .option-item {{ display: inline-block; margin-right: 15px; margin-bottom: 4px; }}
+                            /* 💥 선택지 양쪽 정렬(justify) 및 들여쓰기 💥 */
+                            .options-container {{ margin-top: 8px; }} 
+                            .option-item {{ display: block; text-align: justify; word-break: break-all; margin-bottom: 5px; padding-left: 20px; text-indent: -20px; }}
                             .answers-section {{ break-before: page; page-break-before: always; margin-top: 30px; }}
                             .section-title {{ font-family: 'Noto Sans KR', sans-serif; font-size: 13pt; font-weight: bold; text-align: center; border-bottom: 1px solid #000; padding-bottom: 8px; margin-bottom: 20px; }}
                             .answer-block {{ break-inside: avoid; page-break-inside: avoid; margin-bottom: 15px; text-align: justify; word-break: keep-all; }}
