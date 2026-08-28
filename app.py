@@ -51,6 +51,20 @@ if 'problem_cache' not in st.session_state: st.session_state.problem_cache = loa
 if 'history_db' not in st.session_state: st.session_state.history_db = load_json(HISTORY_DB_FILE)
 if 'pattern_db' not in st.session_state: st.session_state.pattern_db = load_json(PATTERN_DB_FILE)
 
+# 💥 43-45번 분할 지문 강제 통합 (Migration) 로직 💥
+db_migrated = False
+for exam_k, passages in st.session_state.passage_db.items():
+    if any(k in passages for k in ['43번', '44번', '45번']):
+        combined_text = ""
+        if '43번' in passages: combined_text += passages.pop('43번') + "\n"
+        if '44번' in passages: combined_text += passages.pop('44번') + "\n"
+        if '45번' in passages: combined_text += passages.pop('45번') + "\n"
+        if combined_text.strip():
+            passages['43-45번'] = combined_text.strip()
+            db_migrated = True
+if db_migrated:
+    save_json(DB_FILE, st.session_state.passage_db)
+
 if 'page' not in st.session_state: st.session_state.page = 'login'
 if 'role' not in st.session_state: st.session_state.role = None
 if 'current_menu' not in st.session_state: st.session_state.current_menu = "🎯 변형문제 제작"
@@ -148,26 +162,25 @@ def create_word_file(problems_list, header_title):
     return buffer
 
 def rule_based_check(task_type, prob_data):
-    if not all(k in prob_data for k in ["question", "passage", "condition", "post_text", "options", "answer", "explanation"]): return False, "JSON 결함"
+    if not all(k in prob_data for k in ["question", "passage", "condition", "post_text", "options", "answer", "explanation"]): return False, "JSON 기본 키 결함"
     passage = prob_data.get("passage", "")
     if task_type in ["어법", "어휘", "흐름(과 무관한 문장)"] and "①" not in passage: return False, "지문 내 번호(①) 누락"
     if task_type == "삽입" and "[박스]" not in passage: return False, "문장 [박스] 누락"
     return True, "통과"
 
 def process_chunk(chunk, exam_key, passage_db, history_db, pattern_db, model):
-    prompt = "당신은 고등학교 내신 영어 출제 전문가입니다. 다음 [출제 목록]에 맞게 출제하세요.\n\n"
+    prompt = "당신은 최고 수준의 고등학교 영어 출제위원 및 검수위원(Validator)입니다. [출제 목록]에 맞게 완벽한 논리의 문제를 출제하세요.\n\n"
     for idx, task in enumerate(chunk):
         passage_text = passage_db[exam_key][task['q_num']]
         diff_str = task.get('q_difficulty', '중 (표준/실전)') 
         
-        # 💥 명확해진 개별 포맷 지시 (혼합이 아님)
         prompt += f"요청 {idx+1}. 지문(이름): {task['q_num']}, 세부유형: {task['q_type']}, 출제형태: [{task['q_format']}], 타겟 난이도: {diff_str}\n"
         
         if task.get('exclude_history', False):
             hist_list = history_db.get(exam_key, {}).get(f"{task['q_num']}_{task['q_type']}", [])
             if hist_list:
-                hist_str = "\n".join(hist_list[-3:])
-                prompt += f"🚨 [출제 회피 명령]: 과거 정답 포인트입니다.\n{hist_str}\n이 포인트들을 완벽히 피해서 완전히 새로운 문제를 출제하세요!\n"
+                hist_str = "\n".join(hist_list[-4:]) # 최대 4개 회피
+                prompt += f"🚨 [출제 회피 명령]: 이전에 출제한 정답 포인트입니다.\n{hist_str}\n이 포인트들을 완벽히 피해서 완전히 다른 문장에 새로운 빈칸이나 함정을 만드세요!\n"
         
         if task['q_type'] in pattern_db and pattern_db[task['q_type']]:
             available_patterns = pattern_db[task['q_type']]
@@ -178,32 +191,33 @@ def process_chunk(chunk, exam_key, passage_db, history_db, pattern_db, model):
             if not filtered: filtered = available_patterns 
             if filtered:
                 random_pattern = random.choice(filtered)
-                prompt += f"🏫 [적용할 학교 기출 패턴]: '{random_pattern}'\n이 패턴을 적극 모방하세요.\n"
+                prompt += f"🏫 [적용할 기출 패턴]: '{random_pattern}'\n이 패턴을 적극 모방하세요.\n"
         
-        if "상" in diff_str:
-            prompt += "🔥 [난이도 상 부스터]: 고난도 어휘 변형 및 매력적 오답 함정 필수.\n"
-        elif "하" in diff_str:
-            prompt += "🌱 [난이도 하 부스터]: 기초 어휘 사용, 정답이 직관적으로 보이게 출제.\n"
+        if "상" in diff_str: prompt += "🔥 [난이도 상 부스터]: 고난도 어휘 변형 및 매력적 오답 함정 필수 배치.\n"
+        elif "하" in diff_str: prompt += "🌱 [난이도 하 부스터]: 기초 어휘 사용, 직관적인 정답 도출.\n"
             
         prompt += f"원문: {passage_text}\n\n"
     
-    # 💥 프롬프트 명확화 (발문에 객관식/주관식 섞어 쓰지 않도록 강력 경고)
-    prompt += """[💥 출력 구조 및 자가 검수 규칙 💥]
-반드시 아래의 JSON 배열 형식을 100% 엄격하게 준수하여 출력하세요.
+    prompt += """[💥 출력 구조 및 AI 자가 검수(Validator) 규칙 💥]
+1. 객관식은 반드시 정답이 1개여야 하며, 복수 정답의 여지가 없도록 스스로 논리를 2번 검증하세요.
+2. 주관식 서술형일 경우 options 배열은 반드시 비워둡니다([]).
+3. 아래의 JSON 배열 형식을 100% 엄격하게 준수하여 출력하세요.
 [
   {
-    "question": "다음 글의 ~로 알맞은 것은? (🚨경고: 출제 형태에 맞는 짧고 명확한 지시문 하나만 씁니다. 객관식과 주관식 지시문을 절대 한 문장에 섞어 쓰지 마세요!)",
-    "passage": "영어 원문만 들어갑니다.",
-    "condition": "서술형 조건 (객관식이면 무조건 빈 문자열 \"\")",
+    "question": "다음 글의 ~로 알맞은 것은? (지시문만 짧게 기재)",
+    "passage": "영어 원문만 기재",
+    "condition": "서술형 조건 (객관식이면 \"\")",
     "post_text": "[요약문] 빈칸 문장이나 하단 텍스트 (없으면 \"\")",
-    "options": ["①...", "②..."], // 🚨경고: 출제형태가 '주관식(서술형) 전용'일 경우 무조건 빈 배열 [] 로 둡니다. 절대 선지를 만들지 마세요.
+    "options": ["①...", "②..."],
     "answer": "정답",
     "explanation": "해설"
   }
-]
-[필수] 결과물 출력 전 위 규칙과 구조를 완벽히 지켰는지 자가 검증하세요."""
+]"""
     
-    for attempt in range(3): 
+    # 💥 지능형 과속 방지기 (Exponential Backoff) 도입
+    wait_times = [4, 8, 15, 30] 
+    
+    for attempt in range(4): 
         try:
             response = model.generate_content(prompt)
             raw_text = response.text
@@ -224,29 +238,30 @@ def process_chunk(chunk, exam_key, passage_db, history_db, pattern_db, model):
                     match_q = re.search(r'\[요약문\]|<요약문>|【요약문】', q_text)
                     if match_q:
                         split_idx = match_q.start()
-                        post_part = q_text[split_idx:].strip()
+                        prob["post_text"] = (q_text[split_idx:].strip() + "\n" + prob.get("post_text", "").strip()).strip()
                         prob["question"] = q_text[:split_idx].strip()
-                        existing_post = prob.get("post_text", "").strip()
-                        prob["post_text"] = (post_part + "\n" + existing_post).strip()
 
                     p_text = prob.get("passage", "")
                     match_p = re.search(r'<조건>|\[조건\]', p_text)
                     if match_p:
                         split_idx = match_p.start()
-                        cond_part = p_text[split_idx:].replace("<조건>", "").replace("[조건]", "").strip()
+                        prob["condition"] = (p_text[split_idx:].replace("<조건>", "").replace("[조건]", "").strip() + "\n" + prob.get("condition", "").strip()).strip()
                         prob["passage"] = p_text[:split_idx].strip()
-                        existing_cond = prob.get("condition", "").strip()
-                        prob["condition"] = (cond_part + "\n" + existing_cond).strip()
 
-                    # 💥 파이썬 주관식 선지 멸균기 (가장 강력한 조치) 💥
                     if "주관식" in chunk[idx]['q_format']:
-                        prob["options"] = [] # AI가 실수로 1~5번을 달아놔도 여기서 무조건 날려버림
+                        prob["options"] = [] 
 
                     valid_probs.append(prob)
             return chunk, valid_probs, True
-        except Exception as e: time.sleep(2.0)
+            
+        except Exception as e: 
+            error_details = str(e)
+            if attempt < 3:
+                time.sleep(wait_times[attempt]) # 과부하 시 점진적 휴식
+            else:
+                return chunk, [{"question": "[⚠️검수 실패] API 통신 또는 구조 오류", "passage": "문제를 생성하는 도중 한계에 도달했습니다.", "condition": "", "post_text": "", "options": [], "answer": "1", "explanation": f"오류 원인: {error_details}"} for _ in chunk], False
         
-    return chunk, [{"question": "[⚠️검수 실패] 복합 출제 오류. 난이도나 유형을 단순화하여 다시 시도하세요.", "passage": "AI 생성 중 오류가 발생했습니다.", "condition": "", "post_text": "", "options": [], "answer": "1", "explanation": "재시도 요망"} for _ in chunk], False
+    return chunk, [], False
 
 def toggle_all_types():
     keys = ["t_purpose", "t_mood", "t_claim", "t_main_idea", "t_topic", "t_title", "t_match", 
@@ -376,12 +391,16 @@ elif st.session_state.page == 'main':
             queue_col1, queue_col2 = st.columns(2)
             with queue_col1:
                 sort_order = st.radio("🔄 출제 정렬 기준", ["지문 순서대로 (예: 18번 지문으로 모든 유형 출제 후 19번으로)", "문제 유형 순서대로 (예: 전체 지문의 주제 유형 출제 후 어법으로)"])
+                
+                # 💥 1유형당 출제할 배수(Multiplier) 옵션 💥
+                q_multiplier = st.number_input("✖️ 1개 지문+유형당 출제할 문항 수 (기본 1문제)", min_value=1, max_value=5, value=1, step=1)
+                
             with queue_col2:
                 st.write("♾️ 무한 변형 출제 옵션")
                 exclude_history = st.checkbox("☑️ 이전에 출제한 문제 제외 (새로운 함정/빈칸 창조)")
             
             st.write("")
-            split_size = st.number_input("파일 1개당 출제할 문제 수 (기본: 150)", min_value=10, max_value=500, value=150, step=10)
+            split_size = st.number_input("파일 1개당 출력 제한 (기본: 150)", min_value=10, max_value=500, value=150, step=10)
             
             if st.button("🛒 1단계: 출제 대기열(Queue) 생성하기", type="secondary", use_container_width=True):
                 selected_q_nums = [k for k in st.session_state.passage_db.get(exam_key, {}).keys() if st.session_state.get(f"q_{k}")]
@@ -406,17 +425,18 @@ elif st.session_state.page == 'main':
                 else:
                     new_queue = []
                     
-                    # 💥 파이썬 사전 할당 로직: 혼합 옵션을 선택했어도, 대기열에는 100% 명확하게 택1 하여 배정함
                     if "지문 순서" in sort_order:
                         for q in selected_q_nums:
                             for t in selected_types_list:
-                                assigned_format = random.choice(["객관식 전용", "주관식(서술형) 전용"]) if exam_format == "객관식+주관식 혼합" else exam_format
-                                new_queue.append({"q_num": q, "q_type": t, "q_format": assigned_format, "exclude_history": exclude_history, "q_difficulty": exam_diff})
+                                for _ in range(q_multiplier): # 배수만큼 큐 복제
+                                    assigned_format = random.choice(["객관식 전용", "주관식(서술형) 전용"]) if exam_format == "객관식+주관식 혼합" else exam_format
+                                    new_queue.append({"q_num": q, "q_type": t, "q_format": assigned_format, "exclude_history": exclude_history, "q_difficulty": exam_diff})
                     else:
                         for t in selected_types_list:
                             for q in selected_q_nums:
-                                assigned_format = random.choice(["객관식 전용", "주관식(서술형) 전용"]) if exam_format == "객관식+주관식 혼합" else exam_format
-                                new_queue.append({"q_num": q, "q_type": t, "q_format": assigned_format, "exclude_history": exclude_history, "q_difficulty": exam_diff})
+                                for _ in range(q_multiplier):
+                                    assigned_format = random.choice(["객관식 전용", "주관식(서술형) 전용"]) if exam_format == "객관식+주관식 혼합" else exam_format
+                                    new_queue.append({"q_num": q, "q_type": t, "q_format": assigned_format, "exclude_history": exclude_history, "q_difficulty": exam_diff})
                                 
                     st.session_state.exam_queue = new_queue
                     st.session_state.total_tasks = len(new_queue)
@@ -444,13 +464,13 @@ elif st.session_state.page == 'main':
                         current_batch = st.session_state.exam_queue[:target_amount]
                         cached_results = {}
                         tasks_to_process = []
-                        for task in current_batch:
-                            # v6 캐시 적용으로 기존의 불량 출력물 완벽 격리
-                            cache_key = f"v6_{exam_key}_{task['q_num']}_{task['q_type']}_{task['q_format']}_{task['q_difficulty']}"
+                        for i, task in enumerate(current_batch):
+                            # N배수 출제 시 캐시 키 충돌 방지를 위해 인덱스 추가 (v7 업데이트)
+                            cache_key = f"v7_{exam_key}_{task['q_num']}_{task['q_type']}_{task['q_format']}_{task['q_difficulty']}_{i}"
                             if not task['exclude_history'] and cache_key in st.session_state.problem_cache: 
                                 cached_results[cache_key] = st.session_state.problem_cache[cache_key]
                             else: 
-                                tasks_to_process.append(task)
+                                tasks_to_process.append((i, task))
                         
                         progress_bar = st.progress(0)
                         status_text = st.empty()
@@ -461,18 +481,23 @@ elif st.session_state.page == 'main':
                             chunks = [tasks_to_process[i:i + chunk_size] for i in range(0, len(tasks_to_process), chunk_size)]
                             total_chunks = len(chunks)
                             completed_chunks = 0
+                            
                             with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
-                                future_to_chunk = {executor.submit(process_chunk, c, exam_key, st.session_state.passage_db, st.session_state.history_db, st.session_state.pattern_db, model): c for c in chunks}
+                                # 튜플 리스트에서 task만 분리하여 함수 전달
+                                future_to_chunk = {executor.submit(process_chunk, [item[1] for item in c], exam_key, st.session_state.passage_db, st.session_state.history_db, st.session_state.pattern_db, model): c for c in chunks}
                                 for future in concurrent.futures.as_completed(future_to_chunk):
+                                    original_chunk_with_index = future_to_chunk[future]
                                     chunk_info, probs, success = future.result()
+                                    
                                     for idx, task in enumerate(chunk_info):
                                         if idx < len(probs):
                                             prob_result = probs[idx]
-                                            cache_key = f"v6_{exam_key}_{task['q_num']}_{task['q_type']}_{task['q_format']}_{task['q_difficulty']}"
+                                            original_index = original_chunk_with_index[idx][0]
+                                            cache_key = f"v7_{exam_key}_{task['q_num']}_{task['q_type']}_{task['q_format']}_{task['q_difficulty']}_{original_index}"
                                             st.session_state.problem_cache[cache_key] = prob_result
                                             cached_results[cache_key] = prob_result
                                             
-                                            if success:
+                                            if success and '오류 원인' not in prob_result.get('explanation', ''):
                                                 hist_key = f"{task['q_num']}_{task['q_type']}"
                                                 if exam_key not in st.session_state.history_db: st.session_state.history_db[exam_key] = {}
                                                 if hist_key not in st.session_state.history_db[exam_key]: st.session_state.history_db[exam_key][hist_key] = []
@@ -482,12 +507,22 @@ elif st.session_state.page == 'main':
                                     completed_chunks += 1
                                     progress = min(1.0, completed_chunks / total_chunks)
                                     progress_bar.progress(progress)
-                                    status_text.text(f"⚡ 초고속 병렬 출제 중... (총 {total_chunks}구간 중 {completed_chunks}구간 완료)")
+                                    status_text.text(f"⚡ 지능형 출제 중... API 과부하 차단 회피 작동 (총 {total_chunks}구간 중 {completed_chunks}구간 완료)")
+                                    
+                                    # 💥 API 호출 사이 딜레이 추가 (과속 완벽 억제)
+                                    time.sleep(1.0)
+                                    
                             save_json(CACHE_FILE, st.session_state.problem_cache)
                             save_json(HISTORY_DB_FILE, st.session_state.history_db)
                         
-                        status_text.text(f"✅ Part {st.session_state.part_counter} 초고속 출제 완료! 렌더링 중...")
-                        all_generated_problems = [cached_results[f"v6_{exam_key}_{task['q_num']}_{task['q_type']}_{task['q_format']}_{task['q_difficulty']}"] for task in current_batch if f"v6_{exam_key}_{task['q_num']}_{task['q_type']}_{task['q_format']}_{task['q_difficulty']}" in cached_results]
+                        status_text.text(f"✅ Part {st.session_state.part_counter} 지능형 출제 완료! 렌더링 중...")
+                        
+                        # 렌더링 시 원래 순서 유지
+                        all_generated_problems = []
+                        for i, task in enumerate(current_batch):
+                            cache_key = f"v7_{exam_key}_{task['q_num']}_{task['q_type']}_{task['q_format']}_{task['q_difficulty']}_{i}"
+                            if cache_key in cached_results:
+                                all_generated_problems.append(cached_results[cache_key])
                         
                         questions_html = ""
                         answers_html = ""
