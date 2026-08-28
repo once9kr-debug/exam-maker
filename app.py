@@ -136,7 +136,7 @@ else:
                     try:
                         # 1. Gemini 엔진 세팅 (최신 빠르고 저렴한 1.5 flash 모델 사용)
                         genai.configure(api_key=api_key)
-                        model = genai.GenerativeModel('gemini-1.0-pro')
+                        model = genai.GenerativeModel('gemini-1.5-flash')
                         
                         dummy_passage = "Dear Residents, I am Trixie Mitchell, the director of the Riverside Community Center..."
                         
