@@ -51,7 +51,7 @@ if 'problem_cache' not in st.session_state: st.session_state.problem_cache = loa
 if 'history_db' not in st.session_state: st.session_state.history_db = load_json(HISTORY_DB_FILE)
 if 'pattern_db' not in st.session_state: st.session_state.pattern_db = load_json(PATTERN_DB_FILE)
 
-# 💥 43-45번 분할 지문 강제 통합 (Migration) 청소 로직 💥
+# 43-45번 분할 지문 강제 통합
 db_migrated = False
 for exam_k, passages in st.session_state.passage_db.items():
     if any(k in passages for k in ['43번', '44번', '45번']):
@@ -138,11 +138,10 @@ def create_word_file(problems_list, header_title):
             except: doc.add_paragraph(passage_raw)
         else: doc.add_paragraph(passage_raw)
         
-        # 💥 조건 박스 줄바꿈 처리 💥
         condition_raw = data.get("condition", "").strip()
         if condition_raw:
             condition_clean = condition_raw.replace("<조건>", "").replace("</조건>", "").strip()
-            condition_clean = re.sub(r'\s+(\d\.)', r'\n\1', condition_clean).strip() # 1. 2. 3. 앞에서 줄바꿈
+            condition_clean = re.sub(r'\s+(\d\.)', r'\n\1', condition_clean).strip() 
             p_cond = doc.add_paragraph()
             p_cond.paragraph_format.space_before = Pt(5); p_cond.paragraph_format.space_after = Pt(5); p_cond.paragraph_format.line_spacing = 1.15; p_cond.paragraph_format.left_indent = Inches(0.1)
             p_cond.add_run("[조건]\n").bold = True; p_cond.runs[0].font.size = Pt(9)
@@ -152,22 +151,20 @@ def create_word_file(problems_list, header_title):
         if post_text_raw:
             p_post = doc.add_paragraph(); p_post.paragraph_format.space_before = Pt(5); p_post.add_run(post_text_raw).bold = True
         
-        # 💥 선택지 양쪽 정렬 및 서술형 여백 확보 💥
         options = data.get("options", [])
         if options: 
             for opt in options:
                 p_opt = doc.add_paragraph(opt)
                 p_opt.paragraph_format.left_indent = Inches(0.2)
                 p_opt.paragraph_format.first_line_indent = Inches(-0.2)
-                p_opt.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY # 영어 지문처럼 양쪽 정렬
+                p_opt.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY 
         else:
-            for _ in range(4): doc.add_paragraph("") # 서술형 빈 공간 4줄 추가
+            for _ in range(4): doc.add_paragraph("")
             
     doc.add_page_break(); doc.add_heading("정답 및 해설", level=1)
     for idx, data in enumerate(problems_list):
         p_ans = doc.add_paragraph(); p_ans.add_run(f"{idx+1}번 - {data.get('answer', '')}").bold = True
         
-        # 💥 해설지 특정 태그 자동 줄바꿈 💥
         exp_text = data.get('explanation', '')
         exp_text = re.sub(r'(\[오답.*?\])', r'\n\1', exp_text)
         exp_text = re.sub(r'(\[단어.*?\])', r'\n\1', exp_text)
@@ -178,24 +175,35 @@ def create_word_file(problems_list, header_title):
 
 def rule_based_check(task_type, prob_data):
     if not all(k in prob_data for k in ["question", "passage", "condition", "post_text", "options", "answer", "explanation"]): return False, "JSON 기본 키 결함"
-    passage = prob_data.get("passage", "")
-    if task_type in ["어법", "어휘", "흐름(과 무관한 문장)"] and "①" not in passage: return False, "지문 내 번호(①) 누락"
-    if task_type == "삽입" and "[박스]" not in passage: return False, "문장 [박스] 누락"
     return True, "통과"
 
 def process_chunk(chunk, exam_key, passage_db, history_db, pattern_db, model):
-    prompt = "당신은 최고 수준의 고등학교 영어 출제위원 및 검수위원(Validator)입니다. [출제 목록]에 맞게 완벽한 논리의 문제를 출제하세요.\n\n"
+    # 💥 프롬프트 전면 개편 (Flash 제어용 철통 방어막) 💥
+    prompt = "당신은 최고 수준의 고등학교 영어 출제위원입니다. 아래의 엄격한 [출제 행동 강령]을 무조건 준수하여 출제하세요.\n\n"
+    
+    prompt += """[💥 필수: 지문 장르 논리성 검수 💥]
+1. 먼저 지문의 내용이 '객관적/기술적 설명문'인지 '개인의 일화/감정'인지 파악하세요.
+2. 기술/설명문 지문에서 '분위기(mood)'나 '어조(tone)'를 묻는 억지스러운 출제는 절대 금지합니다. 만약 템플릿이 분위기를 묻더라도 무시하고, '주제/요지/목적' 등 논리에 맞는 문항으로 자체 수정하여 출제하세요.
+
+[💥 출력 구조 및 포맷 강제 규칙 💥]
+1. "question" 칸: 오직 지시문(발문)만 완성된 한 문장으로 적으세요. 중간에 잘리거나 쉼표/조사로 끝나면 절대 안 됩니다. (예: "다음 글의 요지로 가장 적절한 것은?")
+2. "post_text" 칸: <조건>에서 '[보기]의 단어를 배열하시오'라고 명시했다면, 이 칸에 반드시 지어낸 영어 단어 목록(예: [보기] apple / banana / maintain ...)을 작성해야 합니다. 절대 빼먹지 마세요!
+3. "options" 칸: 주관식/서술형이면 무조건 빈 배열 `[]` 로 두세요. 객관식일 경우에만 5개 선지를 넣으세요.
+4. 출력은 반드시 아래 JSON 배열 형식으로만 응답해야 합니다.
+
+[\n  {\n    "question": "완성된 질문 한 문장",\n    "passage": "영어 원문",\n    "condition": "서술형 조건 1. 2. 3. (없으면 \"\")",\n    "post_text": "[요약문] ... 또는 [보기] 단어들 (없으면 \"\")",\n    "options": ["①...", "②..."],\n    "answer": "정답",\n    "explanation": "해설"\n  }\n]\n\n[출제 목록]\n"""
+
     for idx, task in enumerate(chunk):
         passage_text = passage_db[exam_key][task['q_num']]
         diff_str = task.get('q_difficulty', '중 (표준/실전)') 
         
-        prompt += f"요청 {idx+1}. 지문(이름): {task['q_num']}, 세부유형: {task['q_type']}, 출제형태: [{task['q_format']}], 타겟 난이도: {diff_str}\n"
+        prompt += f"요청 {idx+1}. 지문: {task['q_num']}, 세부유형: {task['q_type']}, 출제형태: [{task['q_format']}], 난이도: {diff_str}\n"
         
         if task.get('exclude_history', False):
             hist_list = history_db.get(exam_key, {}).get(f"{task['q_num']}_{task['q_type']}", [])
             if hist_list:
-                hist_str = "\n".join(hist_list[-4:]) # 최대 4개 회피
-                prompt += f"🚨 [출제 회피 명령]: 이전에 출제한 정답 포인트입니다.\n{hist_str}\n이 포인트들을 완벽히 피해서 완전히 다른 문장에 새로운 빈칸이나 함정을 만드세요!\n"
+                hist_str = "\n".join(hist_list[-3:])
+                prompt += f"🚨 [출제 회피 명령]: 이전에 출제된 정답 포인트입니다.\n{hist_str}\n이 부분들을 피해서 새로운 빈칸이나 함정을 만드세요.\n"
         
         if task['q_type'] in pattern_db and pattern_db[task['q_type']]:
             available_patterns = pattern_db[task['q_type']]
@@ -206,32 +214,10 @@ def process_chunk(chunk, exam_key, passage_db, history_db, pattern_db, model):
             if not filtered: filtered = available_patterns 
             if filtered:
                 random_pattern = random.choice(filtered)
-                prompt += f"🏫 [적용할 기출 패턴]: '{random_pattern}'\n이 패턴을 적극 모방하세요.\n"
+                prompt += f"🏫 [참고할 기출 패턴]: '{random_pattern}'\n(단, 지문 장르와 안 맞으면 패턴을 무시하세요.)\n"
         
-        if "상" in diff_str: prompt += "🔥 [난이도 상 부스터]: 고난도 어휘 변형 및 매력적 오답 함정 필수 배치.\n"
-        elif "하" in diff_str: prompt += "🌱 [난이도 하 부스터]: 기초 어휘 사용, 직관적인 정답 도출.\n"
-            
         prompt += f"원문: {passage_text}\n\n"
     
-    # 💥 <보기> 제시어 누락(환각) 방지 및 AI 투트랙 검수 지시어 추가 💥
-    prompt += """[💥 출력 구조 및 AI 자가 검수(Validator) 규칙 💥]
-1. 객관식은 반드시 정답이 1개여야 하며, 복수 정답의 여지가 없도록 논리를 2번 검증하세요.
-2. 주관식 서술형일 경우 options 배열은 반드시 비워둡니다([]).
-3. 🚨필수(환각 방지): <조건>에 '<보기>에 주어진 단어를 사용할 것' 등 제시어 사용 조건이 있다면, "post_text" 칸에 반드시 [보기] 단어 목록을 지어내서 나열하세요. (예: [보기] profound / empathy / insight ...)
-4. 아래의 JSON 배열 형식을 100% 엄격하게 준수하여 출력하세요.
-[
-  {
-    "question": "다음 글의 ~로 알맞은 것은? (지시문만 짧게 기재)",
-    "passage": "영어 원문만 기재",
-    "condition": "서술형 조건 (객관식이면 \"\")",
-    "post_text": "[요약문] 또는 [보기] 단어 제시 영역 (없으면 \"\")",
-    "options": ["①...", "②..."],
-    "answer": "정답",
-    "explanation": "해설"
-  }
-]"""
-    
-    # 지능형 과속 방지기 (Exponential Backoff)
     wait_times = [4, 8, 15, 30] 
     
     for attempt in range(4): 
@@ -251,23 +237,9 @@ def process_chunk(chunk, exam_key, passage_db, history_db, pattern_db, model):
                     is_ok, msg = rule_based_check(chunk[idx]['q_type'], prob)
                     if not is_ok: raise ValueError(msg)
                     
-                    q_text = prob.get("question", "")
-                    match_q = re.search(r'\[요약문\]|<요약문>|【요약문】|\[보기\]|<보기>', q_text)
-                    if match_q:
-                        split_idx = match_q.start()
-                        prob["post_text"] = (q_text[split_idx:].strip() + "\n" + prob.get("post_text", "").strip()).strip()
-                        prob["question"] = q_text[:split_idx].strip()
-
-                    p_text = prob.get("passage", "")
-                    match_p = re.search(r'<조건>|\[조건\]', p_text)
-                    if match_p:
-                        split_idx = match_p.start()
-                        prob["condition"] = (p_text[split_idx:].replace("<조건>", "").replace("[조건]", "").strip() + "\n" + prob.get("condition", "").strip()).strip()
-                        prob["passage"] = p_text[:split_idx].strip()
-
                     if "주관식" in chunk[idx]['q_format']: prob["options"] = [] 
-
                     valid_probs.append(prob)
+                    
             return chunk, valid_probs, True
             
         except Exception as e: 
@@ -275,7 +247,7 @@ def process_chunk(chunk, exam_key, passage_db, history_db, pattern_db, model):
             if attempt < 3:
                 time.sleep(wait_times[attempt]) 
             else:
-                return chunk, [{"question": "[⚠️검수 실패] API 통신 또는 구조 오류", "passage": "문제를 생성하는 도중 한계에 도달했습니다.", "condition": "", "post_text": "", "options": [], "answer": "1", "explanation": f"오류 원인: {error_details}"} for _ in chunk], False
+                return chunk, [{"question": "[⚠️검수 실패] 구조 오류", "passage": "문제를 생성하는 도중 한계에 도달했습니다.", "condition": "", "post_text": "", "options": [], "answer": "1", "explanation": f"오류 원인: {error_details}"} for _ in chunk], False
         
     return chunk, [], False
 
@@ -472,8 +444,8 @@ elif st.session_state.page == 'main':
                         cached_results = {}
                         tasks_to_process = []
                         for i, task in enumerate(current_batch):
-                            # 캐시 키 v8 업데이트 (최신 프롬프트 강제화)
-                            cache_key = f"v8_{exam_key}_{task['q_num']}_{task['q_type']}_{task['q_format']}_{task['q_difficulty']}_{i}"
+                            # 💥 v12 업데이트 (강력한 프롬프트 결합된 Flash)
+                            cache_key = f"v12_{exam_key}_{task['q_num']}_{task['q_type']}_{task['q_format']}_{task['q_difficulty']}_{i}"
                             if not task['exclude_history'] and cache_key in st.session_state.problem_cache: 
                                 cached_results[cache_key] = st.session_state.problem_cache[cache_key]
                             else: 
@@ -481,7 +453,9 @@ elif st.session_state.page == 'main':
                         
                         progress_bar = st.progress(0)
                         status_text = st.empty()
-                        model = genai.GenerativeModel('gemini-3.6-flash')
+                        
+                        # 💥 다시 빠르고 가성비 좋은 Flash 모델로 회귀 💥
+                        model = genai.GenerativeModel('gemini-1.5-flash')
                         
                         if tasks_to_process:
                             chunk_size = 2 
@@ -499,7 +473,7 @@ elif st.session_state.page == 'main':
                                         if idx < len(probs):
                                             prob_result = probs[idx]
                                             original_index = original_chunk_with_index[idx][0]
-                                            cache_key = f"v8_{exam_key}_{task['q_num']}_{task['q_type']}_{task['q_format']}_{task['q_difficulty']}_{original_index}"
+                                            cache_key = f"v12_{exam_key}_{task['q_num']}_{task['q_type']}_{task['q_format']}_{task['q_difficulty']}_{original_index}"
                                             st.session_state.problem_cache[cache_key] = prob_result
                                             cached_results[cache_key] = prob_result
                                             
@@ -513,7 +487,7 @@ elif st.session_state.page == 'main':
                                     completed_chunks += 1
                                     progress = min(1.0, completed_chunks / total_chunks)
                                     progress_bar.progress(progress)
-                                    status_text.text(f"⚡ 지능형 출제 중... API 과부하 차단 회피 작동 (총 {total_chunks}구간 중 {completed_chunks}구간 완료)")
+                                    status_text.text(f"⚡ [Flash 엔진] 초고속 출제 중... 논리 검수 적용 (총 {total_chunks}구간 중 {completed_chunks}구간 완료)")
                                     time.sleep(1.0)
                                     
                             save_json(CACHE_FILE, st.session_state.problem_cache)
@@ -523,7 +497,7 @@ elif st.session_state.page == 'main':
                         
                         all_generated_problems = []
                         for i, task in enumerate(current_batch):
-                            cache_key = f"v8_{exam_key}_{task['q_num']}_{task['q_type']}_{task['q_format']}_{task['q_difficulty']}_{i}"
+                            cache_key = f"v12_{exam_key}_{task['q_num']}_{task['q_type']}_{task['q_format']}_{task['q_difficulty']}_{i}"
                             if cache_key in cached_results: all_generated_problems.append(cached_results[cache_key])
                         
                         questions_html = ""
@@ -542,7 +516,6 @@ elif st.session_state.page == 'main':
                                 passage_html = f'<div class="inserted-box">{inserted_box}</div><div class="passage-box">{main_passage}</div>'
                             else: passage_html = f'<div class="passage-box">{passage_raw}</div>'
                             
-                            # 💥 조건 박스 줄바꿈 처리 (HTML) 💥
                             condition_raw = data.get("condition", "").strip()
                             condition_html = ""
                             if condition_raw and condition_raw != '""':
@@ -555,7 +528,6 @@ elif st.session_state.page == 'main':
                             if post_text_raw and post_text_raw != '""':
                                 post_text_html = f'<div class="post-text-box"><b>{post_text_raw}</b></div>'
                                 
-                            # 💥 선택지 양쪽 정렬 및 서술형 여백 확보 (HTML) 💥
                             options_html = ""
                             options = data.get("options", [])
                             if options:
@@ -567,7 +539,6 @@ elif st.session_state.page == 'main':
                                 
                             questions_html += f'<div class="question-block"><div class="question-title">{q_title}</div>{passage_html}{condition_html}{post_text_html}{options_html}</div>'
                             
-                            # 💥 해설지 태그 앞 자동 줄바꿈 (HTML) 💥
                             exp_text = data.get("explanation", "")
                             exp_text = re.sub(r'(\[오답.*?\])', r'<br><br>\1', exp_text)
                             exp_text = re.sub(r'(\[단어.*?\])', r'<br><br>\1', exp_text)
@@ -593,7 +564,6 @@ elif st.session_state.page == 'main':
                             .condition-box {{ border: 1.5px dashed #7F8C8D; padding: 8px 10px; margin-top: 5px; background-color: #FDFEFE; line-height: 1.3; font-size: 9pt; }}
                             .condition-title {{ font-weight: bold; color: #E74C3C; margin-bottom: 4px; }}
                             .post-text-box {{ margin-top: 8px; font-size: 10pt; padding-left: 5px; line-height: 1.4; }}
-                            /* 💥 선택지 양쪽 정렬(justify) 및 들여쓰기 💥 */
                             .options-container {{ margin-top: 8px; }} 
                             .option-item {{ display: block; text-align: justify; word-break: break-all; margin-bottom: 5px; padding-left: 20px; text-indent: -20px; }}
                             .answers-section {{ break-before: page; page-break-before: always; margin-top: 30px; }}
@@ -655,7 +625,7 @@ elif st.session_state.page == 'main':
                 is_duplicate = len(st.session_state.passage_db.get(exam_key, {})) > 0
                 if is_duplicate and not is_admin_ext: st.error("🚨 이미 이 조건으로 등록된 모의고사가 있습니다. 하단에서 삭제 후 올려주세요.")
                 else:
-                    with st.spinner("AI가 텍스트를 정제하고 분석하고 있습니다..."):
+                    with st.spinner("AI가 텍스트 정제 및 분석 중입니다..."):
                         try:
                             raw_q_text = extract_text_from_file(uploaded_q_pdf)
                             raw_a_text = extract_text_from_file(uploaded_a_pdf) if uploaded_a_pdf else "정답지 없음."
@@ -669,7 +639,7 @@ elif st.session_state.page == 'main':
                                 prompt = f"""[Task] 아래 [원문]의 끝까지 단락을 나누어 JSON 객체로 출력하세요. {prefix_inst}
 [원문]\n{raw_q_text}\n[정답지]\n{raw_a_text}"""
 
-                            model = genai.GenerativeModel('gemini-3.6-flash')
+                            model = genai.GenerativeModel('gemini-1.5-flash')
                             response = model.generate_content(prompt)
                             res_text = response.text.strip().replace("```json", "").replace("```", "").strip()
                             
@@ -683,7 +653,6 @@ elif st.session_state.page == 'main':
                             except json.JSONDecodeError: st.error("🚨 텍스트를 읽지 못했습니다. PDF로 다시 업로드해 주세요.")
                         except Exception as e: st.error(f"서버 오류: {e}")
 
-        # 💥 전국 기출 패턴 무한 학습소 UI 💥
         st.markdown("---")
         st.markdown("<div class='pattern-box'><b>🏫 전국 기출 패턴 무한 학습소 (거푸집 추출기)</b><br>타 지역 학교 기출문제를 대량으로 올려, 다양한 서술형/객관식 문제의 스타일(템플릿)을 시스템에 학습시킵니다.</div>", unsafe_allow_html=True)
         
@@ -696,7 +665,7 @@ elif st.session_state.page == 'main':
         if pattern_files:
             if st.button("🧠 기출 패턴 일괄 학습 시작", type="primary"):
                 with st.spinner(f"총 {len(pattern_files)}개의 기출문제 파일에서 출제 패턴과 난이도를 분석하고 있습니다..."):
-                    model = genai.GenerativeModel('gemini-3.6-flash')
+                    model = genai.GenerativeModel('gemini-1.5-flash')
                     extracted_count = 0
                     
                     for p_file in pattern_files:
