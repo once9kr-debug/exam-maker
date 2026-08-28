@@ -158,50 +158,45 @@ def process_chunk(chunk, exam_key, passage_db, history_db, pattern_db, model):
     prompt = "당신은 고등학교 내신 영어 출제 전문가입니다. 다음 [출제 목록]에 맞게 출제하세요.\n\n"
     for idx, task in enumerate(chunk):
         passage_text = passage_db[exam_key][task['q_num']]
-        diff_str = task.get('q_difficulty', '중 (표준/실전)') # 난이도 변수 가져오기
+        diff_str = task.get('q_difficulty', '중 (표준/실전)') 
         
-        prompt += f"요청 {idx+1}. 지문(이름): {task['q_num']}, 세부유형: {task['q_type']}, 출제형태: {task['q_format']}, 타겟 난이도: {diff_str}\n"
+        # 💥 명확해진 개별 포맷 지시 (혼합이 아님)
+        prompt += f"요청 {idx+1}. 지문(이름): {task['q_num']}, 세부유형: {task['q_type']}, 출제형태: [{task['q_format']}], 타겟 난이도: {diff_str}\n"
         
         if task.get('exclude_history', False):
             hist_list = history_db.get(exam_key, {}).get(f"{task['q_num']}_{task['q_type']}", [])
             if hist_list:
                 hist_str = "\n".join(hist_list[-3:])
-                prompt += f"🚨 [출제 회피 명령]: 이 지문으로 과거에 출제했던 문제들의 정답 포인트입니다.\n{hist_str}\n이번에는 위 포인트들과 겹치지 않게 완전히 다른 문장이나 다른 각도에서 새로운 문제를 창조하세요!\n"
+                prompt += f"🚨 [출제 회피 명령]: 과거 정답 포인트입니다.\n{hist_str}\n이 포인트들을 완벽히 피해서 완전히 새로운 문제를 출제하세요!\n"
         
-        # 💥 기출 패턴 추출 시 난이도에 맞는 패턴 우선 매칭 💥
         if task['q_type'] in pattern_db and pattern_db[task['q_type']]:
             available_patterns = pattern_db[task['q_type']]
             filtered = available_patterns
-            
             if "상" in diff_str: filtered = [p for p in available_patterns if "[상]" in p]
             elif "중" in diff_str: filtered = [p for p in available_patterns if "[중]" in p]
             elif "하" in diff_str: filtered = [p for p in available_patterns if "[하]" in p]
-            
-            if not filtered: filtered = available_patterns # 해당 난이도 패턴이 없으면 전체에서 랜덤
-            
+            if not filtered: filtered = available_patterns 
             if filtered:
                 random_pattern = random.choice(filtered)
-                prompt += f"🏫 [적용할 학교 기출 패턴]: '{random_pattern}'\n이 패턴의 발문 스타일과 출제 방식을 적극 모방하여 문제를 만드세요.\n"
+                prompt += f"🏫 [적용할 학교 기출 패턴]: '{random_pattern}'\n이 패턴을 적극 모방하세요.\n"
         
-        # 💥 난이도별 부스터 프롬프트 주입 💥
         if "상" in diff_str:
-            prompt += "🔥 [난이도 상(킬러) 부스터]: 고3/토플 수준의 고난도 어휘(동의어/유의어)로 변형하고, 본문 단어를 교묘하게 비튼 아주 매력적이고 헷갈리는 오답 함정을 2개 이상 파세요. 복합적인 추론과 논리력을 요구해야 합니다.\n"
+            prompt += "🔥 [난이도 상 부스터]: 고난도 어휘 변형 및 매력적 오답 함정 필수.\n"
         elif "하" in diff_str:
-            prompt += "🌱 [난이도 하(기초) 부스터]: 고1 기초 수준의 어휘를 사용하고, 정답이 직관적으로 바로 보이도록 출제하세요. 오답은 본문과 확연히 구분되는 쉬운 내용으로 구성하세요.\n"
-        else:
-            prompt += "⚖️ [난이도 중(표준) 부스터]: 고2 표준 내신 수준의 어휘를 사용하고, 적절한 변별력을 가진 오답을 1개 이상 포함하세요.\n"
+            prompt += "🌱 [난이도 하 부스터]: 기초 어휘 사용, 정답이 직관적으로 보이게 출제.\n"
             
         prompt += f"원문: {passage_text}\n\n"
     
+    # 💥 프롬프트 명확화 (발문에 객관식/주관식 섞어 쓰지 않도록 강력 경고)
     prompt += """[💥 출력 구조 및 자가 검수 규칙 💥]
 반드시 아래의 JSON 배열 형식을 100% 엄격하게 준수하여 출력하세요.
 [
   {
-    "question": "다음 글을 읽고, 조건에 맞게 요약문을 완성하시오. (순수 한국어 지시문만)",
+    "question": "다음 글의 ~로 알맞은 것은? (🚨경고: 출제 형태에 맞는 짧고 명확한 지시문 하나만 씁니다. 객관식과 주관식 지시문을 절대 한 문장에 섞어 쓰지 마세요!)",
     "passage": "영어 원문만 들어갑니다.",
-    "condition": "1. 30자 이내로 쓸 것 2. ~다 로 끝날 것 (없으면 \"\")",
-    "post_text": "[요약문] 요약문 빈칸이나 밑줄 친 문장이 있다면 반드시 여기에. (없으면 \"\")",
-    "options": ["①...", "②..."], // 주관식일 경우 []
+    "condition": "서술형 조건 (객관식이면 무조건 빈 문자열 \"\")",
+    "post_text": "[요약문] 빈칸 문장이나 하단 텍스트 (없으면 \"\")",
+    "options": ["①...", "②..."], // 🚨경고: 출제형태가 '주관식(서술형) 전용'일 경우 무조건 빈 배열 [] 로 둡니다. 절대 선지를 만들지 마세요.
     "answer": "정답",
     "explanation": "해설"
   }
@@ -243,11 +238,15 @@ def process_chunk(chunk, exam_key, passage_db, history_db, pattern_db, model):
                         existing_cond = prob.get("condition", "").strip()
                         prob["condition"] = (cond_part + "\n" + existing_cond).strip()
 
+                    # 💥 파이썬 주관식 선지 멸균기 (가장 강력한 조치) 💥
+                    if "주관식" in chunk[idx]['q_format']:
+                        prob["options"] = [] # AI가 실수로 1~5번을 달아놔도 여기서 무조건 날려버림
+
                     valid_probs.append(prob)
             return chunk, valid_probs, True
         except Exception as e: time.sleep(2.0)
         
-    return chunk, [{"question": "[⚠️검수 실패] 수동 확인 요망", "passage": "AI 생성 중 오류가 발생했습니다.", "condition": "", "post_text": "", "options": [], "answer": "1", "explanation": "재시도 요망"} for _ in chunk], False
+    return chunk, [{"question": "[⚠️검수 실패] 복합 출제 오류. 난이도나 유형을 단순화하여 다시 시도하세요.", "passage": "AI 생성 중 오류가 발생했습니다.", "condition": "", "post_text": "", "options": [], "answer": "1", "explanation": "재시도 요망"} for _ in chunk], False
 
 def toggle_all_types():
     keys = ["t_purpose", "t_mood", "t_claim", "t_main_idea", "t_topic", "t_title", "t_match", 
@@ -340,7 +339,6 @@ elif st.session_state.page == 'main':
             st.markdown("<div class='group-header'>📌 1. 출제 형태(Format) 선택</div>", unsafe_allow_html=True)
             exam_format = st.radio("어떤 형태로 출제하시겠습니까?", ["객관식 전용", "주관식(서술형) 전용", "객관식+주관식 혼합"], horizontal=True)
 
-            # 💥 난이도 조절 UI 신설 💥
             st.markdown("<div class='group-header'>📌 2. 출제 타겟 난이도 선택</div>", unsafe_allow_html=True)
             exam_diff = st.radio("학생들의 수준에 맞춰 난이도를 설정하세요.", ["상 (킬러/고난도)", "중 (표준/실전)", "하 (기초/확인)", "랜덤 믹스"], index=1, horizontal=True)
 
@@ -407,15 +405,18 @@ elif st.session_state.page == 'main':
                     st.warning("유형과 지문을 최소 1개 이상 선택해주세요.")
                 else:
                     new_queue = []
-                    # 난이도 옵션도 큐에 담아 전달
+                    
+                    # 💥 파이썬 사전 할당 로직: 혼합 옵션을 선택했어도, 대기열에는 100% 명확하게 택1 하여 배정함
                     if "지문 순서" in sort_order:
                         for q in selected_q_nums:
                             for t in selected_types_list:
-                                new_queue.append({"q_num": q, "q_type": t, "q_format": exam_format, "exclude_history": exclude_history, "q_difficulty": exam_diff})
+                                assigned_format = random.choice(["객관식 전용", "주관식(서술형) 전용"]) if exam_format == "객관식+주관식 혼합" else exam_format
+                                new_queue.append({"q_num": q, "q_type": t, "q_format": assigned_format, "exclude_history": exclude_history, "q_difficulty": exam_diff})
                     else:
                         for t in selected_types_list:
                             for q in selected_q_nums:
-                                new_queue.append({"q_num": q, "q_type": t, "q_format": exam_format, "exclude_history": exclude_history, "q_difficulty": exam_diff})
+                                assigned_format = random.choice(["객관식 전용", "주관식(서술형) 전용"]) if exam_format == "객관식+주관식 혼합" else exam_format
+                                new_queue.append({"q_num": q, "q_type": t, "q_format": assigned_format, "exclude_history": exclude_history, "q_difficulty": exam_diff})
                                 
                     st.session_state.exam_queue = new_queue
                     st.session_state.total_tasks = len(new_queue)
@@ -444,7 +445,8 @@ elif st.session_state.page == 'main':
                         cached_results = {}
                         tasks_to_process = []
                         for task in current_batch:
-                            cache_key = f"v5_{exam_key}_{task['q_num']}_{task['q_type']}_{task['q_format']}_{task['q_difficulty']}"
+                            # v6 캐시 적용으로 기존의 불량 출력물 완벽 격리
+                            cache_key = f"v6_{exam_key}_{task['q_num']}_{task['q_type']}_{task['q_format']}_{task['q_difficulty']}"
                             if not task['exclude_history'] and cache_key in st.session_state.problem_cache: 
                                 cached_results[cache_key] = st.session_state.problem_cache[cache_key]
                             else: 
@@ -466,7 +468,7 @@ elif st.session_state.page == 'main':
                                     for idx, task in enumerate(chunk_info):
                                         if idx < len(probs):
                                             prob_result = probs[idx]
-                                            cache_key = f"v5_{exam_key}_{task['q_num']}_{task['q_type']}_{task['q_format']}_{task['q_difficulty']}"
+                                            cache_key = f"v6_{exam_key}_{task['q_num']}_{task['q_type']}_{task['q_format']}_{task['q_difficulty']}"
                                             st.session_state.problem_cache[cache_key] = prob_result
                                             cached_results[cache_key] = prob_result
                                             
@@ -485,7 +487,7 @@ elif st.session_state.page == 'main':
                             save_json(HISTORY_DB_FILE, st.session_state.history_db)
                         
                         status_text.text(f"✅ Part {st.session_state.part_counter} 초고속 출제 완료! 렌더링 중...")
-                        all_generated_problems = [cached_results[f"v5_{exam_key}_{task['q_num']}_{task['q_type']}_{task['q_format']}_{task['q_difficulty']}"] for task in current_batch if f"v5_{exam_key}_{task['q_num']}_{task['q_type']}_{task['q_format']}_{task['q_difficulty']}" in cached_results]
+                        all_generated_problems = [cached_results[f"v6_{exam_key}_{task['q_num']}_{task['q_type']}_{task['q_format']}_{task['q_difficulty']}"] for task in current_batch if f"v6_{exam_key}_{task['q_num']}_{task['q_type']}_{task['q_format']}_{task['q_difficulty']}" in cached_results]
                         
                         questions_html = ""
                         answers_html = ""
@@ -630,7 +632,7 @@ elif st.session_state.page == 'main':
                             except json.JSONDecodeError: st.error("🚨 텍스트를 읽지 못했습니다. PDF로 다시 업로드해 주세요.")
                         except Exception as e: st.error(f"서버 오류: {e}")
 
-        # 💥 전국 기출 패턴 무한 학습소 UI (난이도 판별 기능 추가) 💥
+        # 💥 전국 기출 패턴 무한 학습소 UI 💥
         st.markdown("---")
         st.markdown("<div class='pattern-box'><b>🏫 전국 기출 패턴 무한 학습소 (거푸집 추출기)</b><br>타 지역 학교 기출문제를 대량으로 올려, 다양한 서술형/객관식 문제의 스타일(템플릿)을 시스템에 학습시킵니다.</div>", unsafe_allow_html=True)
         
@@ -652,9 +654,6 @@ elif st.session_state.page == 'main':
 다음은 특정 학교의 실제 영어 기출문제입니다. 영어 본문은 모두 버리고 문제의 '발문'과 '<조건>' 스타일만 추출하세요.
 [출력 규칙]
 1. 추출한 패턴이 어느 정도의 인지적 부하를 요구하는지 판단하여 문자열 맨 앞에 [상], [중], [하] 태그를 반드시 붙이세요.
-  - [하]: 단순 매칭, 기본적인 주제/내용 찾기
-  - [중]: 조건이 붙은 영작, 배열, 일반적인 빈칸
-  - [상]: 복수 정답 고르기(모두 고르시오), 다중 기호 조합, 복합 추론
 2. 반드시 아래의 JSON 형식으로만 응답하세요.
 {{
   "주제": ["[하] 스타일1(예: 속담으로 고르기)"],
