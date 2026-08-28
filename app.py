@@ -14,21 +14,31 @@ from io import BytesIO
 # ==========================================
 st.set_page_config(page_title="SDH STUDIO", layout="wide", initial_sidebar_state="expanded")
 
-if "logged_in" not in st.session_state:
-    st.session_state.logged_in = False
-if "is_admin" not in st.session_state:
-    st.session_state.is_admin = False
-if "current_page" not in st.session_state:
-    st.session_state.current_page = "list" # list, select, viewer
+if "logged_in" not in st.session_state: st.session_state.logged_in = False
+if "is_admin" not in st.session_state: st.session_state.is_admin = False
+if "current_page" not in st.session_state: st.session_state.current_page = "list"
+
+# 필터 버튼용 세션 상태
+if "f_grade" not in st.session_state: st.session_state.f_grade = "고2"
+if "f_year" not in st.session_state: st.session_state.f_year = "2026"
+if "f_month" not in st.session_state: st.session_state.f_month = "6월"
 
 # ==========================================
 # CSS 스타일링
 # ==========================================
 st.markdown("""
 <style>
-    .sdh-logo { font-size: 24px; font-weight: 900; color: #2C3E50; margin-bottom: 20px; text-align: center; }
-    .disabled-menu { color: #A6ACAF; cursor: not-allowed; padding: 10px 0; }
-    .active-menu { color: #2980B9; font-weight: bold; padding: 10px 0; border-right: 3px solid #2980B9; }
+    .sdh-logo { font-size: 24px; font-weight: 900; color: #2C3E50; margin-bottom: 20px; text-align: center; border: 1px solid #2C3E50; padding: 20px 0;}
+    .disabled-menu { background-color: #D5D8DC; color: #5D6D7E; padding: 15px; text-align: center; border: 1px solid #ABB2B9; margin-bottom: 5px; }
+    .active-menu { background-color: #F8F9F9; color: #2C3E50; padding: 15px; text-align: center; border: 1px solid #2C3E50; font-weight: bold; margin-bottom: 5px; }
+    
+    .filter-box { border: 1px solid #5D6D7E; border-radius: 10px; padding: 20px; margin-bottom: 30px; }
+    .filter-label { font-size: 16px; font-weight: bold; text-align: center; padding: 5px; border: 1px solid #5D6D7E; }
+    
+    .tbl-header { background-color: #4A90E2; color: white; text-align: center; padding: 8px; font-weight: bold; font-size: 16px; border: 1px solid #fff;}
+    .tbl-cell { text-align: center; padding: 12px 5px; font-size: 15px; background-color: #EBF5FB; border-bottom: 1px solid #fff;}
+    .tbl-cell-alt { text-align: center; padding: 12px 5px; font-size: 15px; background-color: #D6EAF8; border-bottom: 1px solid #fff;}
+    
     .exam4you-viewer { column-count: 2; column-gap: 40px; column-rule: 1px solid #ddd; background-color: white; padding: 40px; border: 1px solid #ccc; box-shadow: 2px 2px 10px rgba(0,0,0,0.1); font-family: 'Nanum Myeongjo', serif; }
     .question-box { break-inside: avoid; margin-bottom: 30px; }
     .q-title { font-weight: bold; color: #009688; margin-bottom: 10px; }
@@ -37,37 +47,11 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 기본 HWP/Docx 렌더링 엔진 (임시 쌩얼 버전)
-# ==========================================
-def generate_base_document():
-    doc = docx.Document()
-    for section in doc.sections:
-        section.top_margin = Inches(0.5)
-        section.bottom_margin = Inches(0.5)
-        section.left_margin = Inches(0.6)
-        section.right_margin = Inches(0.6)
-        sectPr = section._sectPr
-        cols = OxmlElement('w:cols')
-        cols.set(qn('w:num'), '2')
-        cols.set(qn('w:space'), '720')
-        sectPr.append(cols)
-
-    heading = doc.add_heading('SDH Premium Decoding - 2026년 6월 고2 모의고사', level=1)
-    heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    doc.add_paragraph("1. 다음 글의 밑줄 친 (A)its \"future-proof\" nature가 의미하는 바로 알맞은 것은?").bold = True
-    doc.add_paragraph("One easily underappreciated feature of a city street or square is (A)its 'future-proof' nature...")
-    
-    buffer = BytesIO()
-    doc.save(buffer)
-    buffer.seek(0)
-    return buffer
-
-# ==========================================
 # 2. 로그인 화면
 # ==========================================
 if not st.session_state.logged_in:
     st.markdown("<div style='max-width: 400px; margin: 100px auto;'>", unsafe_allow_html=True)
-    st.markdown("<div class='sdh-logo'>SDH STUDIO</div>", unsafe_allow_html=True)
+    st.markdown("<div class='sdh-logo'>SDH STUDIO<br><span style='font-size:14px; font-weight:normal;'>(로그인)</span></div>", unsafe_allow_html=True)
     
     user_id = st.text_input("ID")
     user_pw = st.text_input("PW", type="password")
@@ -91,16 +75,14 @@ if not st.session_state.logged_in:
 else:
     # --- 사이드바 메뉴 ---
     with st.sidebar:
-        st.markdown("<div class='sdh-logo'>SDH STUDIO</div>", unsafe_allow_html=True)
-        st.markdown("<div class='active-menu'>📝 모의고사</div>", unsafe_allow_html=True)
-        st.markdown("<div class='disabled-menu'>📄 외부지문 (준비중)</div>", unsafe_allow_html=True)
-        st.markdown("<div class='disabled-menu'>📚 교과서 (준비중)</div>", unsafe_allow_html=True)
+        st.markdown("<div class='sdh-logo'>SDH STUDIO<br><span style='font-size:14px; font-weight:normal;'>(로고)</span></div>", unsafe_allow_html=True)
+        st.markdown("<div class='active-menu'>모의고사</div>", unsafe_allow_html=True)
+        st.markdown("<div class='disabled-menu'>외부지문</div>", unsafe_allow_html=True)
+        st.markdown("<div class='disabled-menu'>교과서</div>", unsafe_allow_html=True)
         
         if st.session_state.is_admin:
-            st.markdown("<hr>", unsafe_allow_html=True)
-            st.markdown("<b>⚙️ 관리자 모드</b>", unsafe_allow_html=True)
-            if st.button("심야 일괄 출제(Batch)", use_container_width=True):
-                st.info("일괄 출제 기능은 추후 연동됩니다.")
+            st.markdown("<div style='margin-top:20px;'></div>", unsafe_allow_html=True)
+            st.markdown("<div class='disabled-menu'>관리자 모드</div>", unsafe_allow_html=True)
                 
         st.markdown("<br><br>", unsafe_allow_html=True)
         if st.button("로그아웃"):
@@ -108,37 +90,98 @@ else:
             st.session_state.is_admin = False
             st.rerun()
 
-    # --- 화면 1: 모의고사 리스트 ---
+    # --- 화면 1: 모의고사 리스트 (새로운 UI 적용) ---
     if st.session_state.current_page == "list":
-        st.subheader("모의고사")
         
-        # 필터 영역
-        col1, col2, col3, col4, col5 = st.columns([1, 1, 1, 1, 1])
-        with col1: st.selectbox("학교/급", ["고등", "중등"])
-        with col2: st.selectbox("분류", ["모의고사"])
-        with col3: st.selectbox("연도", ["2026", "2025"])
-        with col4: st.selectbox("월", ["6월", "3월", "11월"])
-        with col5: st.button("검색 🔍")
-            
-        st.markdown("<hr>", unsafe_allow_html=True)
+        # 상단 필터 박스
+        st.markdown("<div class='filter-box'>", unsafe_allow_html=True)
         
-        # 더미 리스트 (데이터프레임 활용)
-        df = pd.DataFrame({
-            "연도": ["2026", "2026", "2026"],
-            "월": ["6", "6", "6"],
-            "주관": ["2026년 6월", "2026년 6월", "2026년 6월"],
-            "학년": ["1학년", "2학년", "3학년"],
-            "문제수": [329, 323, 281]
-        })
-        st.dataframe(df, use_container_width=True, hide_index=True)
+        # 학년 행
+        col_g1, col_g2 = st.columns([1, 8])
+        with col_g1: st.markdown("<div class='filter-label'>학년</div>", unsafe_allow_html=True)
+        with col_g2:
+            g_btns = st.columns(10)
+            grades = ["고1", "고2", "고3"]
+            for i, g in enumerate(grades):
+                if g_btns[i].button(g, type="primary" if st.session_state.f_grade == g else "secondary", key=f"g_{g}"):
+                    st.session_state.f_grade = g
+                    st.rerun()
         
-        if st.button("👉 고2 2026년 6월 모의고사 출제하기 (보기 버튼 대체)"):
+        st.markdown("<br>", unsafe_allow_html=True)
+        
+        # 연도 행
+        col_y1, col_y2 = st.columns([1, 8])
+        with col_y1: st.markdown("<div class='filter-label'>연도</div>", unsafe_allow_html=True)
+        with col_y2:
+            y_btns = st.columns(12)
+            years = ["2026", "2025", "2024", "2023", "2022", "2021", "2020", "2019", "2018", "2017", "2016", "2015"]
+            for i, y in enumerate(years):
+                if y_btns[i].button(y, type="primary" if st.session_state.f_year == y else "secondary", key=f"y_{y}"):
+                    st.session_state.f_year = y
+                    st.rerun()
+                    
+        st.markdown("<br>", unsafe_allow_html=True)
+        
+        # 월 행
+        col_m1, col_m2 = st.columns([1, 8])
+        with col_m1: st.markdown("<div class='filter-label'>월</div>", unsafe_allow_html=True)
+        with col_m2:
+            m_btns = st.columns(10)
+            months = ["3월", "4월", "5월", "6월", "7월", "9월", "10월", "11월", "12월"]
+            for i, m in enumerate(months):
+                if m_btns[i].button(m, type="primary" if st.session_state.f_month == m else "secondary", key=f"m_{m}"):
+                    st.session_state.f_month = m
+                    st.rerun()
+                    
+        st.markdown("<br>", unsafe_allow_html=True)
+        
+        # 출제 버튼 (상단 필터 하단)
+        if st.button("출제", type="primary", use_container_width=True):
             st.session_state.current_page = "select"
             st.rerun()
+            
+        st.markdown("</div>", unsafe_allow_html=True)
+        
+        # 하단 DB 리스트 표 (Custom Table)
+        # 테이블 헤더
+        h1, h2, h3, h4, h5, h6 = st.columns([1, 1, 1, 1, 2, 1.5])
+        h1.markdown("<div class='tbl-header'>No.</div>", unsafe_allow_html=True)
+        h2.markdown("<div class='tbl-header'>학년</div>", unsafe_allow_html=True)
+        h3.markdown("<div class='tbl-header'>연도</div>", unsafe_allow_html=True)
+        h4.markdown("<div class='tbl-header'>월</div>", unsafe_allow_html=True)
+        h5.markdown("<div class='tbl-header'>업로드일</div>", unsafe_allow_html=True)
+        h6.markdown("<div class='tbl-header'>출제</div>", unsafe_allow_html=True)
+        
+        # DB 더미 데이터
+        db_history = [
+            {"no": 5, "grade": "2", "year": "2026", "month": "3", "date": "2026-08-29"},
+            {"no": 4, "grade": "3", "year": "2015", "month": "4", "date": "2026-08-29"},
+            {"no": 3, "grade": "2", "year": "2022", "month": "6", "date": "2026-08-29"},
+            {"no": 2, "grade": "3", "year": "2025", "month": "11", "date": "2026-08-29"},
+            {"no": 1, "grade": "1", "year": "2026", "month": "9", "date": "2026-08-29"},
+        ]
+        
+        # 테이블 본문 생성
+        for idx, row in enumerate(db_history):
+            cell_class = "tbl-cell-alt" if idx % 2 == 0 else "tbl-cell"
+            
+            c1, c2, c3, c4, c5, c6 = st.columns([1, 1, 1, 1, 2, 1.5])
+            c1.markdown(f"<div class='{cell_class}'>{row['no']}</div>", unsafe_allow_html=True)
+            c2.markdown(f"<div class='{cell_class}'>{row['grade']}</div>", unsafe_allow_html=True)
+            c3.markdown(f"<div class='{cell_class}'>{row['year']}</div>", unsafe_allow_html=True)
+            c4.markdown(f"<div class='{cell_class}'>{row['month']}</div>", unsafe_allow_html=True)
+            c5.markdown(f"<div class='{cell_class}'>{row['date']}</div>", unsafe_allow_html=True)
+            with c6:
+                st.markdown(f"<div style='background-color: {'#D6EAF8' if idx%2==0 else '#EBF5FB'}; padding:5px;'>", unsafe_allow_html=True)
+                if st.button("출제", key=f"btn_out_{row['no']}", use_container_width=True):
+                    # 출제 버튼 클릭 시 선택한 값을 세션에 저장하고 페이지 이동 가능
+                    st.session_state.current_page = "select"
+                    st.rerun()
+                st.markdown("</div>", unsafe_allow_html=True)
 
     # --- 화면 2: 문제 출제 (조건 선택) ---
     elif st.session_state.current_page == "select":
-        st.subheader("모의고사 2026년-6월, 2학년, 고2")
+        st.subheader(f"모의고사 {st.session_state.f_year}년-{st.session_state.f_month}, {st.session_state.f_grade}")
         
         st.write("**1. 출제 유형 선택**")
         c1, c2, c3, c4 = st.columns(4)
@@ -168,7 +211,7 @@ else:
 
     # --- 화면 3: 웹 뷰어 및 출력 ---
     elif st.session_state.current_page == "viewer":
-        st.subheader("[ 2026년도 6월 2학년 고2 모의고사 ]")
+        st.subheader(f"[ {st.session_state.f_year}년도 {st.session_state.f_month} {st.session_state.f_grade} 모의고사 ]")
         
         c_v1, c_v2, c_v3 = st.columns(3)
         with c_v1:
@@ -178,19 +221,13 @@ else:
             
         st.markdown("<hr>", unsafe_allow_html=True)
         
-        # 다운로드 버튼 영역
         d1, d2, d3 = st.columns(3)
-        exam_file = generate_base_document()
-        with d1:
-            st.download_button(label="📥 문제지 다운로드 (HWP/Docx)", data=exam_file, file_name="SDH_Exam.docx", type="primary", use_container_width=True)
-        with d2:
-            st.button("📥 정답지 다운로드", use_container_width=True)
-        with d3:
-            st.button("⬅️ 출제 화면으로 돌아가기", use_container_width=True, on_click=lambda: st.session_state.update(current_page="select"))
+        with d1: st.button("📥 문제지 다운로드 (HWP/Docx)", type="primary", use_container_width=True)
+        with d2: st.button("📥 정답지 다운로드", use_container_width=True)
+        with d3: st.button("⬅️ 출제 화면으로 돌아가기", use_container_width=True, on_click=lambda: st.session_state.update(current_page="select"))
             
         st.markdown("<br>", unsafe_allow_html=True)
         
-        # 2단 뷰어 HTML
         viewer_html = """
         <div class='exam4you-viewer'>
             <div class='question-box'>
